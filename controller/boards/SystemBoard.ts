@@ -2014,9 +2014,9 @@ export class PumpCommands extends BoardCommands {
             if (isNaN(id)) return Promise.reject(new InvalidEquipmentIdError(`Invalid pump id: ${data.id}`, data.id, 'Pump'));
             let pump = sys.pumps.getItemById(id, true);
             await ncp.pumps.setPumpAsync(pump, data);
-            let spump = state.pumps.getItemById(id, true);
-            spump.emitData('pumpExt', spump.getExtended());
-            spump.emitEquipmentChange();
+            let pumpState = state.pumps.getItemById(id, true);
+            pumpState.emitData('pumpExt', pumpState.getExtended());
+            pumpState.emitEquipmentChange();
             return pump;
         }
         catch (err) {
@@ -2030,12 +2030,12 @@ export class PumpCommands extends BoardCommands {
                 let id = typeof data.id === 'undefined' ? -1 : parseInt(data.id, 10);
                 if (isNaN(id) || id <= 0) return Promise.reject(new InvalidEquipmentIdError(`Invalid pump id: ${data.id}`, data.id, 'Pump'));
                 let pump = sys.pumps.getItemById(id, false);
-                let spump = state.pumps.getItemById(id, false);
+                let pumpState = state.pumps.getItemById(id, false);
                 await ncp.pumps.deletePumpAsync(pump.id);
-                spump.isActive = pump.isActive = false;
+                pumpState.isActive = pump.isActive = false;
                 sys.pumps.removeItemById(id);
                 state.pumps.removeItemById(id);
-                spump.emitEquipmentChange();
+                pumpState.emitEquipmentChange();
                 return Promise.resolve(pump);
             }
             catch (err) {
@@ -2047,8 +2047,8 @@ export class PumpCommands extends BoardCommands {
     }
     public deletePumpCircuit(pump: Pump, pumpCircuitId: number) {
         pump.circuits.removeItemById(pumpCircuitId);
-        let spump = state.pumps.getItemById(pump.id);
-        spump.emitData('pumpExt', spump.getExtended());
+        let pumpState = state.pumps.getItemById(pump.id);
+        pumpState.emitData('pumpExt', pumpState.getExtended());
     }
     public availableCircuits() {
         let _availCircuits = [];
