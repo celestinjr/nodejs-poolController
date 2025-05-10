@@ -951,6 +951,8 @@ export class PumpState extends EqState {
     public set address(val: number) { this.setDataVal('address', val); }
     public get name(): string { return this.data.name; }
     public set name(val: string) { this.setDataVal('name', val); }
+    public get isMute(): boolean { return this.data.isMute; }
+    public set isMute(val: boolean) { this.setDataVal('isMute', val); }
     public get rpm(): number { return this.data.rpm; }
     public set rpm(val: number) { this.setDataVal('rpm', val); }
     //public set rpm(val: number) { this.setDataVal('rpm', val, this.exceedsThreshold(this.data.rpm, val)); }
@@ -1031,6 +1033,7 @@ export class PumpState extends EqState {
         if (typeof (cpump.maxFlow) !== 'undefined') pump.maxFlow = cpump.maxFlow;
         pump.speedStepSize = cpump.speedStepSize;
         pump.flowStepSize = cpump.flowStepSize;
+        pump.isMute = cpump.isMute;
         pump.circuits = [];
         for (let i = 0; i < cpump.circuits.length; i++) {
             let c = cpump.circuits.getItemByIndex(i).get(true);

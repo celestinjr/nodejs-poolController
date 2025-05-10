@@ -1484,6 +1484,8 @@ export class Pump extends EqItem {
     public set name(val: string) { this.setDataVal('name', val); }
     public get type(): number | any { return this.data.type; }
     public set type(val: number | any) { this.setDataVal('type', sys.board.valueMaps.pumpTypes.encode(val)); }
+    public get isMute(): boolean { return this.data.isMute; }
+    public set isMute(val: boolean) { this.setDataVal('isMute', val); }
     public get minSpeed(): number { return this.data.minSpeed; }
     public set minSpeed(val: number) { this.setDataVal('minSpeed', val); }
     public get maxSpeed(): number { return this.data.maxSpeed; }
