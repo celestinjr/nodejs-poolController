@@ -1211,3 +1211,7 @@ export class RS485Port {
     }
 }
 export var conn: Connection = new Connection();
+
+if (process.env.NODE_ENV === 'development') {
+    (globalThis as any).conn = conn;
+}

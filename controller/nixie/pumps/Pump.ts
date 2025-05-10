@@ -16,9 +16,9 @@ export class NixiePumpCollection extends NixieEquipmentCollection<NixiePump> {
     public async deletePumpAsync(id: number) {
         try {
             for (let i = this.length - 1; i >= 0; i--) {
-                let pump = this[i];
-                if (pump.id === id) {
-                    await pump.closeAsync();
+                let nixiePump = this[i];
+                if (nixiePump.id === id) {
+                    await nixiePump.closeAsync();
                     this.splice(i, 1);
                 }
             }
@@ -26,36 +26,51 @@ export class NixiePumpCollection extends NixieEquipmentCollection<NixiePump> {
     }
     public async setPumpStateAsync(pstate: PumpState) {
         try {
-            let pump: NixiePump = this.find(elem => elem.id === pstate.id) as NixiePump;
-            if (typeof pump === 'undefined') {
+            let nixiePump: NixiePump = this.find(elem => elem.id === pstate.id) as NixiePump;
+            if (typeof nixiePump === 'undefined') {
                 return logger.error(`Nixie Control Panel Error setPumpState could not find pump ${pstate.id}-${pstate.name}`);
             }
-            await pump.setPumpStateAsync(pstate);
+            await nixiePump.setPumpStateAsync(pstate);
         } catch (err) { logger.error(`Nixie Error setting pump state ${pstate.id}-${pstate.name}: ${err.message}`); return Promise.reject(err); }
     }
+    /**
+     * Asynchronously sets the configuration for a pump. If the pump does not exist in the current context,
+     * it creates a new pump instance and initializes it. If the pump exists but its type is different from
+     * the provided type, it reinitializes the pump with the new type.
+     *
+     * @param pump - The pump object containing the pump's current configuration and metadata.
+     * @param data - An object containing the new configuration data for the pump.
+     * 
+     * @returns A promise that resolves when the pump configuration is successfully set, or rejects with an error
+     *          if the operation fails.
+     * 
+     * @throws {InvalidEquipmentIdError} If the pump type is invalid or undefined.
+     * @throws {Error} If any other error occurs during the operation.
+     */
     public async setPumpAsync(pump: Pump, data: any) {
+
         // By the time we get here we know that we are in control and this is a Nixie pump.
         try {
-            let c: NixiePump = this.find(elem => elem.id === pump.id) as NixiePump;
-            if (typeof c === 'undefined') {
+            let nixiePump: NixiePump = this.find(elem => elem.id === pump.id) as NixiePump;
+            if (typeof nixiePump === 'undefined') {
                 pump.master = 1;
                 if (typeof data.type !== 'undefined') pump.type = data.type; // needed for init of correct type
                 if (typeof pump.type === 'undefined') return Promise.reject(new InvalidEquipmentIdError(`Invalid pump type for ${pump.name}`, data.id, 'Pump'));
-                c = this.pumpFactory(pump);
+                nixiePump = this.pumpFactory(pump);
                 // c = new NixiePump(this.controlPanel, pump);
-                this.push(c);
+                this.push(nixiePump);
                 logger.info(`A pump was not found for id #${pump.id} creating pump`);
-                return await c.setPumpAsync(data);
+                return await nixiePump.setPumpAsync(data);
             }
             else {
-                if (typeof data.type !== 'undefined' && c.pump.type !== data.type) {
+                if (typeof data.type !== 'undefined' && nixiePump.pump.type !== data.type) {
                     // pump exists, changing type
-                    await c.closeAsync();
+                    await nixiePump.closeAsync();
                     pump.type = data.type; // needed for init of correct type
                     if (typeof pump.type === 'undefined') return Promise.reject(new InvalidEquipmentIdError(`Invalid pump type for ${pump.name}`, data.id, 'Pump'));
-                    c = this.pumpFactory(pump);
+                    nixiePump = this.pumpFactory(pump);
                 }
-                return await c.setPumpAsync(data);
+                return await nixiePump.setPumpAsync(data);
             }
         }
         catch (err) { logger.error(`setPumpAsync: ${err.message}`); return Promise.reject(err); }
@@ -65,13 +80,13 @@ export class NixiePumpCollection extends NixieEquipmentCollection<NixiePump> {
             for (let i = 0; i < pumps.length; i++) {
                 let pump = pumps.getItemByIndex(i);
                 if (pump.master === 1) {
-                    let p: NixiePump = this.find(elem => elem.id === pump.id) as NixiePump;
-                    if (typeof p === 'undefined') {
+                    let nixiePump: NixiePump = this.find(elem => elem.id === pump.id) as NixiePump;
+                    if (typeof nixiePump === 'undefined') {
                         let type = sys.board.valueMaps.pumpTypes.getName(pump.type);
-                        let npump = this.pumpFactory(pump);
-                        logger.info(`Initializing Nixie Pump ${npump.id}-${pump.name}`);
-                        this.push(npump);
-                        await npump.initAsync();
+                        let nixiePump = this.pumpFactory(pump);
+                        logger.info(`Initializing Nixie Pump ${nixiePump.id}-${pump.name}`);
+                        this.push(nixiePump);
+                        await nixiePump.initAsync();
                     }
                 }
             }
@@ -90,35 +105,35 @@ export class NixiePumpCollection extends NixieEquipmentCollection<NixiePump> {
             }
         } catch (err) { } // Don't bail if we have an errror.
     }
-    public async setServiceModeAsync() {
+    public async setServiceModeAsync(): Promise<void> {
         try {
             for (let i = this.length - 1; i >= 0; i--) {
                 try {
-                    let p = this[i] as NixiePump;
-                    await p.setServiceModeAsync();
+                    let nixiePump = this[i] as NixiePump;
+                    await nixiePump.setServiceModeAsync();
                 } catch (err) { logger.error(`Error setting service mode for Nixie Pump ${err}`); }
             }
         } catch (err) { } // Don't bail if we have an errror.
     }
     public async initPumpAsync(pump: Pump): Promise<NixiePump> {
         try {
-            let c: NixiePump = this.find(elem => elem.id === pump.id) as NixiePump;
+            let nixiePump: NixiePump = this.find(elem => elem.id === pump.id) as NixiePump;
             if (pump.master === 1) {
                 // if pump exists, close it so we can re-init
                 // (EG if pump type changes, we need to setup a new instance of the pump)
-                if (typeof c !== 'undefined' && c.pump.type !== pump.type) {
-                    await c.closeAsync();
+                if (typeof nixiePump !== 'undefined' && nixiePump.pump.type !== pump.type) {
+                    await nixiePump.closeAsync();
                     await this.deletePumpAsync(pump.id);
-                    c = this.pumpFactory(pump);
-                    this.push(c);
+                    nixiePump = this.pumpFactory(pump);
+                    this.push(nixiePump);
                 }
-                logger.info(`Initializing Existing Nixie Pump ${c.id}-${pump.name}`);
+                logger.info(`Initializing Existing Nixie Pump ${nixiePump.id}-${pump.name}`);
 
             }
-            return c;
+            return nixiePump;
         } catch (err) { return Promise.reject(logger.error(`Nixie Controller: initPumpAsync Error: ${err.message}`)); }
     }
-    private pumpFactory(pump: Pump) {
+    private pumpFactory(pump: Pump): NixiePump {
         let type = sys.board.valueMaps.pumpTypes.getName(pump.type);
         switch (type) {
             case 'ss':
@@ -137,18 +152,20 @@ export class NixiePumpCollection extends NixieEquipmentCollection<NixiePump> {
                 return new NixiePumpHWVS(this.controlPanel, pump);
             case 'hwrly':
                 return new NixiePumpHWRLY(this.controlPanel, pump);
+            case 'regalmodbus':
+                return new NixiePumpRegalModbus(this.controlPanel, pump);
             default:
                 throw new EquipmentNotFoundError(`NCP: Cannot create pump ${pump.name}.`, type);
         }
     }
-    public syncPumpStates() {
+    public syncPumpStates(): void {
         // loop through all pumps and update rates based on circuit changes
         // this would happen in <2s anyway based on pollAsync but this is immediate.
         for (let i = this.length - 1; i >= 0; i--) {
-            let pump = this[i] as NixiePump;
-            if (!pump.suspendPolling) setTimeoutSync(async () => { await pump.pollEquipmentAsync(); }, 100);
+            let nixiePump = this[i] as NixiePump;
+            if (!nixiePump.suspendPolling) setTimeoutSync(async () => { await nixiePump.pollEquipmentAsync(); }, 100);
             else {
-                pump.setTargetSpeed(state.pumps.getItemById(pump.id));
+                nixiePump.setTargetSpeed(state.pumps.getItemById(nixiePump.id));
             }
             // RKS: 05-16-23 - Below backs up the processing.
             /*
@@ -167,6 +184,7 @@ export class NixiePump extends NixieEquipment {
     public pollingInterval: number = 2000;
     protected _pollTimer: NodeJS.Timeout = null;
     public pump: Pump;
+
     protected _targetSpeed: number;
     protected _suspendPolling = 0;
     public get suspendPolling(): boolean { return this._suspendPolling > 0; }
@@ -176,8 +194,8 @@ export class NixiePump extends NixieEquipment {
     }
     public closing = false;
     public async setServiceModeAsync() {
-        let pstate = state.pumps.getItemById(this.pump.id);
-        await this.setPumpStateAsync(pstate);
+        let pumpState = state.pumps.getItemById(this.pump.id);
+        await this.setPumpStateAsync(pumpState);
     }
     /*
     _targetSpeed will hold values as follows:
@@ -200,11 +218,12 @@ export class NixiePump extends NixieEquipment {
         this.pollEquipmentAsync();
     }
     public get id(): number { return typeof this.pump !== 'undefined' ? this.pump.id : -1; }
-    public async setPumpStateAsync(pstate: PumpState) {
+    public async setPumpStateAsync(pumpState: PumpState) {
         try {
             // Here we go we need to set the pump state.
+            logger.warn("NixiePump setPumpStateAsync: Pump state not implemented.  This is a base class and should not be called directly.");
             return new InterfaceServerResponse(200, 'Ok');
-        } catch (err) { return Promise.reject(`Nixie Error setting pump state ${pstate.id}-${pstate.name}: ${err.message}`); }
+        } catch (err) { return Promise.reject(`Nixie Error setting pump state ${pumpState.id}-${pumpState.name}: ${err.message}`); }
     }
     public async setPumpAsync(data: any): Promise<InterfaceServerResponse> {
         try {
@@ -219,45 +238,46 @@ export class NixiePump extends NixieEquipment {
             let type = sys.board.valueMaps.pumpTypes.transform(this.pump.type);
             this.pump.name = data.name || this.pump.name || type.desc;
             if (typeof type.maxCircuits !== 'undefined' && type.maxCircuits > 0 && typeof data.circuits !== 'undefined') { // This pump type supports circuits
-                for (let i = 1; i <= data.circuits.length && i <= type.maxCircuits; i++) {
-                    let c = data.circuits[i - 1];
-                    c.id = i;
-                    let circuit = parseInt(c.circuit, 10);
-                    let cd = this.pump.circuits.find(elem => elem.circuit === circuit);
-                    let speed = parseInt(c.speed, 10);
-                    let relay = parseInt(c.relay, 10);
-                    let flow = parseInt(c.flow, 10);
-                    let units = typeof c.units !== 'undefined' ? sys.board.valueMaps.pumpUnits.encode(c.units) : undefined;
+                for (let iCircuit = 1; iCircuit <= data.circuits.length && iCircuit <= type.maxCircuits; iCircuit++) {
+                    let circuitData = data.circuits[iCircuit - 1];
+                    circuitData.id = iCircuit;
+                    let circuitId = parseInt(circuitData.circuit, 10);
+                    let existingCircuit = this.pump.circuits.find(elem => elem.circuit === circuitId);
+                    let rawSpeed = parseInt(circuitData.speed, 10);
+                    let rawRelay = parseInt(circuitData.relay, 10);
+                    let rawFlow = parseInt(circuitData.flow, 10);
+                    let unitCode = typeof circuitData.units !== 'undefined' ? sys.board.valueMaps.pumpUnits.encode(circuitData.units) : undefined;
                     switch (type.name) {
                         case 'vf':
-                            units = sys.board.valueMaps.pumpUnits.getValue('gpm');
+                            unitCode = sys.board.valueMaps.pumpUnits.getValue('gpm');
                             break;
                         case 'hwvs':
                         case 'vssvrs':
                         case 'vs':
-                            c.units = sys.board.valueMaps.pumpUnits.getValue('rpm');
+                        case 'regalmodbus':
+                            circuitData.units = sys.board.valueMaps.pumpUnits.getValue('rpm');
                             break;
                         case 'ss':
                         case 'ds':
                         case 'sf':
                         case 'hwrly':
-                            c.units = undefined;
+                            circuitData.units = undefined;
                             break;
                     }
-                    if (isNaN(units)) units = typeof cd !== 'undefined' ? cd.units : sys.board.valueMaps.pumpUnits.getValue('rpm');
-                    if (isNaN(speed)) speed = type.minSpeed;
-                    if (isNaN(flow)) flow = type.minFlow;
-                    if (isNaN(relay)) relay = 1;
-                    c.units = units;
+                    if (isNaN(unitCode)) unitCode = typeof existingCircuit !== 'undefined' ? existingCircuit.units : sys.board.valueMaps.pumpUnits.getValue('rpm');
+                    if (isNaN(rawSpeed)) rawSpeed = type.minSpeed;
+                    if (isNaN(rawFlow)) rawFlow = type.minFlow;
+                    if (isNaN(rawRelay)) rawRelay = 1;
+                    circuitData.units = unitCode;
                     //c.units = parseInt(c.units, 10) || type.name === 'vf' ? sys.board.valueMaps.pumpUnits.getValue('gpm') : sys.board.valueMaps.pumpUnits.getValue('rpm');
-                    if (typeof type.minSpeed !== 'undefined' && c.units === sys.board.valueMaps.pumpUnits.getValue('rpm')) {
-                        c.speed = speed;
+                    if (typeof type.minSpeed !== 'undefined' && circuitData.units === sys.board.valueMaps.pumpUnits.getValue('rpm')) {
+                        circuitData.speed = rawSpeed;
                     }
-                    else if (typeof type.minFlow !== 'undefined' && c.units === sys.board.valueMaps.pumpUnits.getValue('gpm')) {
-                        c.flow = flow;
+                    else if (typeof type.minFlow !== 'undefined' && circuitData.units === sys.board.valueMaps.pumpUnits.getValue('gpm')) {
+                        circuitData.flow = rawFlow;
                     }
                     else if (type.maxRelays > 0)
-                        c.relay = relay;
+                        circuitData.relay = rawRelay;
                 }
             }
             else data.circuits = [];
@@ -287,9 +307,9 @@ export class NixiePump extends NixieEquipment {
                 if (this.closing) logger.info(`Pump ${this.id} is closing`);
                 return;
             }
-            let pstate = state.pumps.getItemById(this.pump.id);
-            this.setTargetSpeed(pstate);
-            await this.setPumpStateAsync(pstate);
+            let pumpState = state.pumps.getItemById(this.pump.id);
+            this.setTargetSpeed(pumpState);
+            await this.setPumpStateAsync(pumpState);
         }
         catch (err) { logger.error(`Nixie Error running pump sequence - ${err}`); }
         finally { if (!self.closing) this._pollTimer = setTimeoutSync(async () => await self.pollEquipmentAsync(), self.pollingInterval || 2000); }
@@ -300,7 +320,7 @@ export class NixiePump extends NixieEquipment {
             return dev;
         } catch (err) { logger.error(`Nixie Pump checkHardwareStatusAsync: ${err.message}`); return { hasFault: true } }
     }
-    public async validateSetupAsync(pump: Pump, pstate: PumpState) {
+    public async validateSetupAsync(pump: Pump, pumpState: PumpState) {
         try {
         } catch (err) { logger.error(`Nixie Error checking Pump Hardware ${this.pump.name}: ${err.message}`); return Promise.reject(err); }
     }
@@ -310,23 +330,23 @@ export class NixiePump extends NixieEquipment {
             if (typeof this._pollTimer !== 'undefined' || this._pollTimer) clearTimeout(this._pollTimer);
             this._pollTimer = null;
             this._targetSpeed = 0;
-            let pstate = state.pumps.getItemById(this.pump.id);
+            let pumpState = state.pumps.getItemById(this.pump.id);
             try {
-                await this.setPumpStateAsync(pstate);
+                await this.setPumpStateAsync(pumpState);
                 // Since we are closing we need to not reject.
             } catch (err) { logger.error(`Nixie Closing pump closeAsync: ${err.message}`); }
             // This will make sure the timer is dead and we are completely closed.
             this.closing = true;
             if (typeof this._pollTimer !== 'undefined' || this._pollTimer) clearTimeout(this._pollTimer);
-            pstate.emitEquipmentChange();
+            pumpState.emitEquipmentChange();
         }
         catch (err) { logger.error(`Nixie Pump closeAsync: ${err.message}`); return Promise.reject(err); }
     }
     public logData(filename: string, data: any) { this.controlPanel.logData(filename, data); }
     public setTargetSpeed(pstate: PumpState) { };
-    protected isBodyOn(bodyCode: number) {
-        let assoc = sys.board.valueMaps.pumpBodies.transform(bodyCode);
-        switch (assoc.name) {
+    protected isBodyOn(bodyCode: number): boolean {
+        let bodyType = sys.board.valueMaps.pumpBodies.transform(bodyCode);
+        switch (bodyType.name) {
             case 'body1':
             case 'pool':
                 return state.temps.bodies.getItemById(1).isOn;
@@ -348,21 +368,22 @@ export class NixiePump extends NixieEquipment {
     }
 }
 export class NixiePumpSS extends NixiePump {
-    public setTargetSpeed(pState: PumpState) {
+    public setTargetSpeed(pumpState: PumpState) {
         // Turn on ss pumps.
         let _newSpeed = 0;
-        if (!pState.pumpOnDelay) {
-            let pt = sys.board.valueMaps.pumpTypes.get(this.pump.type);
-            if (pt.maxCircuits === 0 || pt.hasBody) {
+        if (!pumpState.pumpOnDelay) {
+            let pumpType = sys.board.valueMaps.pumpTypes.get(this.pump.type);
+            if (pumpType.maxCircuits === 0 || pumpType.hasBody) {
                 _newSpeed = this.isBodyOn(this.pump.body) ? 1 : 0;
                 //console.log(`BODY: ${sys.board.bodies.isBodyOn(this.pump.body)} CODE: ${this.pump.body}`);
             }
-            else if (!pState.pumpOnDelay) {
-                let pumpCircuits: PumpCircuit[] = this.pump.circuits.get();
-                if (!pState.pumpOnDelay) {
-                    for (let i = 0; i < pumpCircuits.length; i++) {
-                        let circ = state.circuits.getInterfaceById(pumpCircuits[i].circuit);
-                        if (circ.isOn) _newSpeed = 1;
+            else if (!pumpState.pumpOnDelay) {
+                let circuitConfigs: PumpCircuit[] = this.pump.circuits.get();
+                if (!pumpState.pumpOnDelay) {
+                    for (let i = 0; i < circuitConfigs.length; i++) {
+                        let circuitConfig = circuitConfigs[i];
+                        let circuitState = state.circuits.getInterfaceById(circuitConfig.circuit);
+                        if (circuitState.isOn) _newSpeed = 1;
                     }
                 }
             }
@@ -372,68 +393,69 @@ export class NixiePumpSS extends NixiePump {
         this._targetSpeed = _newSpeed;
     }
     public async setServiceModeAsync() {
-        let pstate = state.pumps.getItemById(this.pump.id);
-        pstate.targetSpeed = this._targetSpeed = 0;
-        await this.setPumpStateAsync(pstate);
+        let pumpState = state.pumps.getItemById(this.pump.id);
+        pumpState.targetSpeed = this._targetSpeed = 0;
+        await this.setPumpStateAsync(pumpState);
     }
-    public async setPumpStateAsync(pstate: PumpState) {
-        let relays: PumpRelay[] = this.pump.relays.get();
-        let relayState = 0;
-        for (let i = 0; i < relays.length; i++) {
-            let pr = relays[i];
-            if (typeof pr.id === 'undefined') pr.id = i + 1; // remove when id is added to dP relays upon save.
-            let isOn = this._targetSpeed >> pr.id - 1 & 1;
-            if (utils.isNullOrEmpty(pr.connectionId) || utils.isNullOrEmpty(pr.deviceBinding)) {
+    public async setPumpStateAsync(pumpState: PumpState) {
+        let pumpRelays: PumpRelay[] = this.pump.relays.get();
+        let calculatedRelayState = 0;
+        for (let i = 0; i < pumpRelays.length; i++) {
+            let pumpRelay = pumpRelays[i];
+            if (typeof pumpRelay.id === 'undefined') pumpRelay.id = i + 1; // remove when id is added to dP relays upon save.
+            let shouldBeOn = this._targetSpeed >> pumpRelay.id - 1 & 1;
+            if (utils.isNullOrEmpty(pumpRelay.connectionId) || utils.isNullOrEmpty(pumpRelay.deviceBinding)) {
                 // If they haven't set a program for the relay bugger out.
-                if (isOn) relayState |= (1 << pr.id - 1);
+                if (shouldBeOn) calculatedRelayState |= (1 << pumpRelay.id - 1);
             }
             else {
                 try {
-                    let res = await NixieEquipment.putDeviceService(pr.connectionId, `/state/device/${pr.deviceBinding}`, { isOn, latch: isOn ? 5000 : undefined });
+                    let res = await NixieEquipment.putDeviceService(pumpRelay.connectionId, `/state/device/${pumpRelay.deviceBinding}`, { isOn: shouldBeOn, latch: shouldBeOn ? 5000 : undefined });
                     if (res.status.code === 200) {
-                        if (isOn) relayState |= (1 << pr.id - 1);
+                        if (shouldBeOn) calculatedRelayState |= (1 << pumpRelay.id - 1);
                     }
-                    else pstate.status = 16;
+                    else pumpState.status = 16;
                 }
                 catch (err) {
-                    logger.error(`NCP: Error setting pump ${this.pump.name} relay ${pr.id} to ${isOn ? 'on' : 'off'}.  Error ${err.message}}`);
-                    pstate.status = 16;
+                    logger.error(`NCP: Error setting pump ${this.pump.name} relay ${pumpRelay.id} to ${shouldBeOn ? 'on' : 'off'}.  Error ${err.message}}`);
+                    pumpState.status = 16;
                 }
             }
         }
-        if (pstate.targetSpeed === 0) {
-            pstate.status = 0;
-            pstate.driveState = 0; // We need to set this if it is a priming cycle but it might not matter for our relay based pumps.
-            pstate.command = 0;
+        if (pumpState.targetSpeed === 0) {
+            pumpState.status = 0;
+            pumpState.driveState = 0; // We need to set this if it is a priming cycle but it might not matter for our relay based pumps.
+            pumpState.command = 0;
         }
-        else if (relayState === pstate.targetSpeed) {
-            pstate.status = 1;
-            pstate.driveState = 2;
-            pstate.command = 4;
+        else if (calculatedRelayState === pumpState.targetSpeed) {
+            pumpState.status = 1;
+            pumpState.driveState = 2;
+            pumpState.command = 4;
         }
-        pstate.relay = relayState;
+        pumpState.relay = calculatedRelayState;
         return new InterfaceServerResponse(200, 'Success');
     }
 }
 export class NixiePumpDS extends NixiePumpSS {
-    public setTargetSpeed(pState: PumpState) {
+    public setTargetSpeed(pumpState: PumpState) {
         // Turn on sf pumps.  The new speed will be the relays associated with the pump.  I believe when this comes out in the final
         // wash it should engage all the relays for all speeds associated with the pump.  The pump logic will determine which program is
         // the one to engage.
-        let _newSpeed = 0;
-        if (!pState.pumpOnDelay) {
-            let pumpCircuits: PumpCircuit[] = this.pump.circuits.get();
-            if (!pState.pumpOnDelay) {
-                for (let i = 0; i < pumpCircuits.length; i++) {
-                    let circ = state.circuits.getInterfaceById(pumpCircuits[i].circuit);
+        let calculatedSpeedBitmask = 0;
+        if (!pumpState.pumpOnDelay) {
+            let circuitConfigs: PumpCircuit[] = this.pump.circuits.get();
+            if (!pumpState.pumpOnDelay) {
+                for (let i = 0; i < circuitConfigs.length; i++) {
+                    const configuredCircuit = circuitConfigs[i];
+                    const runtimeCircuit = state.circuits.getInterfaceById(configuredCircuit.circuit);
                     // relay speeds are bit-shifted 'or' based on 1,2,4,8
-                    if (circ.isOn) _newSpeed |= (1 << pumpCircuits[i].relay - 1);
+                    if (runtimeCircuit.isOn) calculatedSpeedBitmask |= (1 << circuitConfigs[i].relay - 1);
                 }
             }
         }
-        if (isNaN(_newSpeed)) _newSpeed = 0;
-        this.logSpeed(_newSpeed);
-        this._targetSpeed = _newSpeed;
+        if (isNaN(calculatedSpeedBitmask)) calculatedSpeedBitmask = 0;
+        this.logSpeed(calculatedSpeedBitmask);
+        this._targetSpeed = calculatedSpeedBitmask;
     }
     public logSpeed(_newSpeed: number) {
         if (this._targetSpeed !== _newSpeed) logger.info(`NCP: Setting Pump ${this.pump.name} relays to Relay 1: ${_newSpeed & 1 ? 'on' : 'off'}, Relay 2: ${_newSpeed & 2 ? 'on' : 'off'}.`);
@@ -471,64 +493,68 @@ export class NixiePumpHWRLY extends NixiePumpDS {
     // |   8   |   ON    |   ON    |   ON    |   ON    |
     // +-------+---------+---------+---------+---------+
 
-    public setTargetSpeed(pState: PumpState) {
-        let _newSpeed = 0;
-        if (!pState.pumpOnDelay) {
-            let pumpCircuits = this.pump.circuits.get();
-            for (let i = 0; i < pumpCircuits.length; i++) {
-                let circ = state.circuits.getInterfaceById(pumpCircuits[i].circuit);
-                let pc = pumpCircuits[i];
+    public setTargetSpeed(pumpState: PumpState) {
+        let computedSpeed = 0;
+        if (!pumpState.pumpOnDelay) {
+            let circuitConfigs = this.pump.circuits.get();
+            for (let i = 0; i < circuitConfigs.length; i++) {
+                let circuitConfig = circuitConfigs[i];
+                let circ = state.circuits.getInterfaceById(circuitConfig.circuit);
                 if (circ.isOn) {
-                    _newSpeed = Math.max(_newSpeed, pc.relay);
+                    computedSpeed = Math.max(computedSpeed, circuitConfig.relay);
                 }
             }
         }
-        if (isNaN(_newSpeed)) _newSpeed = 0;
-        this._targetSpeed = _newSpeed;
+        if (isNaN(computedSpeed)) computedSpeed = 0;
+        this._targetSpeed = computedSpeed;
         if (this._targetSpeed !== 0) Math.min(Math.max(this.pump.minSpeed, this._targetSpeed), this.pump.maxSpeed);
-        if (this._targetSpeed !== _newSpeed) logger.info(`NCP: Setting Pump ${this.pump.name} to ${_newSpeed}.`);
+        if (this._targetSpeed !== computedSpeed) logger.info(`NCP: Setting Pump ${this.pump.name} to ${computedSpeed}.`);
     }
-    public async setPumpStateAsync(pstate: PumpState) {
+    public async setPumpStateAsync(pumpState: PumpState) {
         // Don't poll while we are seting the state.
         this.suspendPolling = true;
         try {
-            let relays: PumpRelay[] = this.pump.relays.get();
-            let relayState = 0;
-            let targetState = 0;
-            for (let i = 0; i < relays.length; i++) {
-                let pr = relays[i];
-                if (typeof pr.id === 'undefined') pr.id = i + 1; // remove when id is added to dP relays upon save.
+            let relayConfigs: PumpRelay[] = this.pump.relays.get();
+            let actualRelayMask = 0;
+            let desiredRelayMask = 0;
+            for (let i = 0; i < relayConfigs.length; i++) {
+                let relayConfig = relayConfigs[i];
+                if (typeof relayConfig.id === 'undefined') relayConfig.id = i + 1; // remove when id is added to dP relays upon save.
                 // If we are turning on the pump relay #4 needs to be on.  NOTE: It is expected that the OVRD relay is hooked up in a normally closed
                 // configuration so that whenever the pump is off the relay terminals are closed.
-                let isOn = this._targetSpeed > 0 ? i === 3 ? true : (this._targetSpeed - 1 & (1 << i)) > 0 : false;
-                let bit = isOn ? (1 << i) : 0;
-                targetState |= bit;
-                if (utils.isNullOrEmpty(pr.connectionId) || utils.isNullOrEmpty(pr.deviceBinding)) {
-                    // Determine whether the relay should be on.
-                    relayState |= bit;
+                let relayShouldBeOn = this._targetSpeed > 0 ? i === 3 ? true : (this._targetSpeed - 1 & (1 << i)) > 0 : false;
+                let relayBit = relayShouldBeOn ? (1 << i) : 0;
+                desiredRelayMask |= relayBit;
+                let isVirtualRelay = utils.isNullOrEmpty(relayConfig.connectionId) || utils.isNullOrEmpty(relayConfig.deviceBinding);
+                if (isVirtualRelay) {
+                    actualRelayMask |= relayBit;
                 }
                 else {
                     try {
-                        let res = await NixieEquipment.putDeviceService(pr.connectionId, `/state/device/${pr.deviceBinding}`, { isOn, latch: isOn ? 5000 : undefined });
+                        let res = await NixieEquipment.putDeviceService(relayConfig.connectionId, `/state/device/${relayConfig.deviceBinding}`, { isOn: relayShouldBeOn, latch: relayShouldBeOn ? 5000 : undefined });
                         if (res.status.code === 200) {
-                            relayState |= bit;
+                            actualRelayMask |= relayBit;
                         }
-                        else pstate.status = 16;
+                        else pumpState.status = 16;
                     }
                     catch (err) {
-                        logger.error(`NCP: Error setting pump ${this.pump.name} relay ${pr.id} to ${isOn ? 'on' : 'off'}.  Error ${err.message}}`);
-                        pstate.status = 16;
+                        logger.error(`NCP: Error setting pump ${this.pump.name} relay ${relayConfig.id} to ${relayShouldBeOn ? 'on' : 'off'}.  Error ${err.message}}`);
+                        pumpState.status = 16;
                     }
                 }
             }
-            pstate.command = this._targetSpeed;
-            if (targetState === relayState) {
-                pstate.status = relayState > 0 ? 1 : 0;
-                pstate.driveState = relayState > 0 ? 2 : 0;
-                pstate.relay = relayState;
+
+            const relaysMatch = actualRelayMask === desiredRelayMask;
+            const anyRelaysActive = actualRelayMask > 0;
+
+            pumpState.command = this._targetSpeed;
+            if (relaysMatch) {
+                pumpState.status = anyRelaysActive ? 1 : 0;
+                pumpState.driveState = anyRelaysActive ? 2 : 0;
+                pumpState.relay = actualRelayMask;
             }
             else {
-                pstate.driveState = 0;
+                pumpState.driveState = 0;
             }
             return new InterfaceServerResponse(200, 'Success');
         }
@@ -546,21 +572,21 @@ export class NixiePumpRS485 extends NixiePump {
         await this.setDriveStateAsync(false);
         await this.setPumpToRemoteControlAsync(false);
     }
-    public async setPumpStateAsync(pstate: PumpState) {
+    public async setPumpStateAsync(pumpState: PumpState) {
         // Don't poll while we are seting the state.
         this.suspendPolling = true;
         try {
-            let pt = sys.board.valueMaps.pumpTypes.get(this.pump.type);
+            let pumpType = sys.board.valueMaps.pumpTypes.get(this.pump.type);
             if (state.mode === 0) {
                 // Since these process are async the closing flag can be set
                 // between calls.  We need to check it in between each call.
                 if (!this.closing) await this.setDriveStateAsync();
                 if (!this.closing) {
-                    if (this._targetSpeed >= pt.minFlow && this._targetSpeed <= pt.maxFlow) await this.setPumpGPMAsync();
-                    else if (this._targetSpeed >= pt.minSpeed && this._targetSpeed <= pt.maxSpeed) await this.setPumpRPMAsync();
+                    if (this._targetSpeed >= pumpType.minFlow && this._targetSpeed <= pumpType.maxFlow) await this.setPumpGPMAsync();
+                    else if (this._targetSpeed >= pumpType.minSpeed && this._targetSpeed <= pumpType.maxSpeed) await this.setPumpRPMAsync();
                 }
                 ;
-                if (!this.closing && pt.name !== 'vsf' && pt.name !== 'vs') await this.setPumpFeatureAsync(6);;
+                if (!this.closing && pumpType.name !== 'vsf' && pumpType.name !== 'vs') await this.setPumpFeatureAsync(6);;
                 if (!this.closing) await setTimeout(1000);;
                 if (!this.closing) await this.requestPumpStatusAsync();;
                 if (!this.closing) await this.setPumpToRemoteControlAsync();;
@@ -573,7 +599,7 @@ export class NixiePumpRS485 extends NixiePump {
         }
         finally { this.suspendPolling = false; }
     };
-    protected async setDriveStateAsync(running: boolean = true) {
+    protected async setDriveStateAsync(isRunning: boolean = true) {
         try {
             if (conn.isPortEnabled(this.pump.portId || 0)) {
                 let out = Outbound.create({
@@ -581,7 +607,7 @@ export class NixiePumpRS485 extends NixiePump {
                     protocol: Protocol.Pump,
                     dest: this.pump.address,
                     action: 6,
-                    payload: running && this._targetSpeed > 0 ? [10] : [4],
+                    payload: isRunning && this._targetSpeed > 0 ? [10] : [4],
                     retries: 1,
                     response: true
                 });
@@ -593,8 +619,8 @@ export class NixiePumpRS485 extends NixiePump {
                 }
             }
             else {
-                let pstate = state.pumps.getItemById(this.pump.id);
-                pstate.command = pstate.rpm > 0 || pstate.flow > 0 ? 10 : 0;
+                let pumpState = state.pumps.getItemById(this.pump.id);
+                pumpState.command = pumpState.rpm > 0 || pumpState.flow > 0 ? 10 : 0;
             }
         } catch (err) { logger.error(`Error setting driveState for ${this.pump.name}: ${err.message}`); }
     };
@@ -617,7 +643,7 @@ export class NixiePumpRS485 extends NixiePump {
             }
         }
     };
-    protected async setPumpToRemoteControlAsync(running: boolean = true) {
+    protected async setPumpToRemoteControlAsync(isRunning: boolean = true) {
         try {
             if (conn.isPortEnabled(this.pump.portId || 0)) {
                 let out = Outbound.create({
@@ -625,7 +651,7 @@ export class NixiePumpRS485 extends NixiePump {
                     protocol: Protocol.Pump,
                     dest: this.pump.address,
                     action: 4,
-                    payload: running ? [255] : [0], // when stopAsync is called, pass false to return control to pump panel
+                    payload: isRunning ? [255] : [0], // when stopAsync is called, pass false to return control to pump panel
                     retries: 1,
                     response: true
                 });
@@ -708,11 +734,11 @@ export class NixiePumpRS485 extends NixiePump {
             if (typeof this._pollTimer !== 'undefined' || this._pollTimer) clearTimeout(this._pollTimer);
             this._pollTimer = null;
             this.closing = true;
-            let pt = sys.board.valueMaps.pumpTypes.get(this.pump.type);
-            let pstate = state.pumps.getItemById(this.pump.id);
+            let pumpType = sys.board.valueMaps.pumpTypes.get(this.pump.type);
+            let pumpState = state.pumps.getItemById(this.pump.id);
             this._targetSpeed = 0;
             await this.setDriveStateAsync(false);
-            if (!this.closing && pt.name !== 'vsf' && pt.name !== 'vs') await this.setPumpFeatureAsync();
+            if (!this.closing && pumpType.name !== 'vsf' && pumpType.name !== 'vs') await this.setPumpFeatureAsync();
             //await this.setPumpFeature(); 
             //await this.setDriveStateAsync(false); 
             await this.setPumpToRemoteControlAsync(false);
@@ -720,51 +746,51 @@ export class NixiePumpRS485 extends NixiePump {
             // have another process that revives it from the dead.
             if (typeof this._pollTimer !== 'undefined' || this._pollTimer) clearTimeout(this._pollTimer);
             this._pollTimer = null;
-            pstate.emitEquipmentChange();
+            pumpState.emitEquipmentChange();
         }
         catch (err) { logger.error(`Nixie Pump closeAsync: ${err.message}`); return Promise.reject(err); }
         finally { this.suspendPolling = false; }
     }
 }
 export class NixiePumpVS extends NixiePumpRS485 {
-    public setTargetSpeed(pState: PumpState) {
-        let _newSpeed = 0;
-        if (!pState.pumpOnDelay) {
-            let pumpCircuits = this.pump.circuits.get();
+    public setTargetSpeed(pumpState: PumpState) {
+        let newSpeed = 0;
+        if (!pumpState.pumpOnDelay) {
+            let circuitConfigs = this.pump.circuits.get();
 
-            for (let i = 0; i < pumpCircuits.length; i++) {
-                let circ = state.circuits.getInterfaceById(pumpCircuits[i].circuit);
-                let pc = pumpCircuits[i];
-                if (circ.isOn) _newSpeed = Math.max(_newSpeed, pc.speed);
+            for (let i = 0; i < circuitConfigs.length; i++) {
+                let circuitConfig = circuitConfigs[i];
+                let circuitState = state.circuits.getInterfaceById(circuitConfig.circuit);
+                if (circuitState.isOn) newSpeed = Math.max(newSpeed, circuitConfig.speed);
             }
         }
-        if (isNaN(_newSpeed)) _newSpeed = 0;
-        this._targetSpeed = _newSpeed;
+        if (isNaN(newSpeed)) newSpeed = 0;
+        this._targetSpeed = newSpeed;
         if (this._targetSpeed !== 0) Math.min(Math.max(this.pump.minSpeed, this._targetSpeed), this.pump.maxSpeed);
-        if (this._targetSpeed !== _newSpeed) logger.info(`NCP: Setting Pump ${this.pump.name} to ${_newSpeed} RPM.`);
+        if (this._targetSpeed !== newSpeed) logger.info(`NCP: Setting Pump ${this.pump.name} to ${newSpeed} RPM.`);
     }
 }
 export class NixiePumpVF extends NixiePumpRS485 {
-    public setTargetSpeed(pState: PumpState) {
-        let _newSpeed = 0;
-        if (!pState.pumpOnDelay) {
-            let pumpCircuits = this.pump.circuits.get();
-            for (let i = 0; i < pumpCircuits.length; i++) {
-                let circ = state.circuits.getInterfaceById(pumpCircuits[i].circuit);
-                let pc = pumpCircuits[i];
-                if (circ.isOn) _newSpeed = Math.max(_newSpeed, pc.flow);
+    public setTargetSpeed(pumpState: PumpState) {
+        let newSpeed = 0;
+        if (!pumpState.pumpOnDelay) {
+            let circuitConfigs = this.pump.circuits.get();
+            for (let i = 0; i < circuitConfigs.length; i++) {
+                let circuitConfig = circuitConfigs[i];
+                let circuitState = state.circuits.getInterfaceById(circuitConfig.circuit);
+                if (circuitState.isOn) newSpeed = Math.max(newSpeed, circuitConfig.flow);
             }
         }
-        if (isNaN(_newSpeed)) _newSpeed = 0;
-        this._targetSpeed = _newSpeed;
+        if (isNaN(newSpeed)) newSpeed = 0;
+        this._targetSpeed = newSpeed;
         if (this._targetSpeed !== 0) Math.min(Math.max(this.pump.minFlow, this._targetSpeed), this.pump.maxFlow);
-        if (this._targetSpeed !== _newSpeed) logger.info(`NCP: Setting Pump ${this.pump.name} to ${_newSpeed} GPM.`);
+        if (this._targetSpeed !== newSpeed) logger.info(`NCP: Setting Pump ${this.pump.name} to ${newSpeed} GPM.`);
     }
-    public async setPumpStateAsync(pstate: PumpState) {
+    public async setPumpStateAsync(pumpState: PumpState) {
         // Don't poll while we are seting the state.
         this.suspendPolling = true;
         try {
-            let pt = sys.board.valueMaps.pumpTypes.get(this.pump.type);
+            let pumpType = sys.board.valueMaps.pumpTypes.get(this.pump.type);
             if (state.mode === 0) {
                 // Since these process are async the closing flag can be set
                 // between calls.  We need to check it in between each call. // 4, 6, 5,  7
@@ -791,14 +817,14 @@ export class NixiePumpVF extends NixiePumpRS485 {
     };
 }
 export class NixiePumpVSF extends NixiePumpRS485 {
-    public setTargetSpeed(pState: PumpState) {
-        let _newSpeed = 0;
+    public setTargetSpeed(pumpState: PumpState) {
+        let newSpeed = 0;
         let maxRPM = 0;
         let maxGPM = 0;
         let useFlow = false;
-        if (!pState.pumpOnDelay) {
-            let pumpCircuits = this.pump.circuits.get();
-            let pt = sys.board.valueMaps.pumpTypes.get(this.pump.type);
+        if (!pumpState.pumpOnDelay) {
+            let circuitConfigs = this.pump.circuits.get();
+            let pumpType = sys.board.valueMaps.pumpTypes.get(this.pump.type);
             // VSF pumps present a problem.  In fact they do not currently operate properly on Touch panels.  On touch these need to either be all in RPM or GPM
             // if there is a mix in the circuit array then they will not work.  In IntelliCenter if there is an RPM setting in the mix it will use RPM by converting
             // the GPM to RPM but if there is none then it will use GPM.
@@ -818,30 +844,30 @@ export class NixiePumpVSF extends NixiePumpRS485 {
                 let gpm = Math.min(Math.round((eff * speed) / maxSpeed), maxFlow);
                 return gpm > 0 ? Math.max(gpm, minFlow) : 0;
             }
-            for (let i = 0; i < pumpCircuits.length; i++) {
-                let circ = state.circuits.getInterfaceById(pumpCircuits[i].circuit);
-                let pc = pumpCircuits[i];
-                if (circ.isOn) {
-                    if (pc.units > 0) {
-                        let rpm = toRPM(pc.flow, pt.minSpeed, pt.MaxSpeed);
+            for (let i = 0; i < circuitConfigs.length; i++) {
+                let circuitConfig = circuitConfigs[i];
+                let circuitState = state.circuits.getInterfaceById(circuitConfig.circuit);
+                if (circuitState.isOn) {
+                    if (circuitConfig.units > 0) {
+                        let rpm = toRPM(circuitConfig.flow, pumpType.minSpeed, pumpType.MaxSpeed);
                         if (rpm > maxRPM) useFlow = true;
-                        maxGPM = Math.max(maxGPM, pc.flow);
+                        maxGPM = Math.max(maxGPM, circuitConfig.flow);
                         rpm = Math.max(maxRPM, rpm);
                     }
                     else {
-                        let gpm = toGPM(pc.speed, pt.maxSpeed, pt.minFlow, pt.maxFlow);
+                        let gpm = toGPM(circuitConfig.speed, pumpType.maxSpeed, pumpType.minFlow, pumpType.maxFlow);
                         if (gpm > maxGPM) useFlow = false;
-                        maxRPM = Math.max(maxRPM, pc.speed);
+                        maxRPM = Math.max(maxRPM, circuitConfig.speed);
                         maxGPM = Math.max(maxGPM, gpm);
                     }
                 }
             }
-            _newSpeed = useFlow ? maxGPM : maxRPM;
+            newSpeed = useFlow ? maxGPM : maxRPM;
         }
-        if (isNaN(_newSpeed)) _newSpeed = 0;
+        if (isNaN(newSpeed)) newSpeed = 0;
         // Send the flow message if it is flow and the rpm message if it is rpm.
-        if (this._targetSpeed !== _newSpeed) logger.info(`NCP: Setting Pump ${this.pump.name} to ${_newSpeed} ${useFlow ? 'GPM' : 'RPM'}.`);
-        this._targetSpeed = _newSpeed;
+        if (this._targetSpeed !== newSpeed) logger.info(`NCP: Setting Pump ${this.pump.name} to ${newSpeed} ${useFlow ? 'GPM' : 'RPM'}.`);
+        this._targetSpeed = newSpeed;
     }
     protected async setPumpRPMAsync() {
         // vsf action is 10 for rpm
@@ -886,28 +912,28 @@ export class NixiePumpVSF extends NixiePumpRS485 {
     };
 };
 export class NixiePumpHWVS extends NixiePumpRS485 {
-    public setTargetSpeed(pState: PumpState) {
-        let _newSpeed = 0;
-        if (!pState.pumpOnDelay) {
-            let pumpCircuits = this.pump.circuits.get();
+    public setTargetSpeed(pumpState: PumpState) {
+        let newSpeed = 0;
+        if (!pumpState.pumpOnDelay) {
+            let circuitConfigs = this.pump.circuits.get();
 
-            for (let i = 0; i < pumpCircuits.length; i++) {
-                let circ = state.circuits.getInterfaceById(pumpCircuits[i].circuit);
-                let pc = pumpCircuits[i];
-                if (circ.isOn) _newSpeed = Math.max(_newSpeed, pc.speed);
+            for (let i = 0; i < circuitConfigs.length; i++) {
+                let circuitConfig = circuitConfigs[i];
+                let circuitState = state.circuits.getInterfaceById(circuitConfig.circuit);
+                if (circuitState.isOn) newSpeed = Math.max(newSpeed, circuitConfig.speed);
             }
         }
-        if (isNaN(_newSpeed)) _newSpeed = 0;
-        this._targetSpeed = _newSpeed;
+        if (isNaN(newSpeed)) newSpeed = 0;
+        this._targetSpeed = newSpeed;
         if (this._targetSpeed !== 0) Math.min(Math.max(this.pump.minSpeed, this._targetSpeed), this.pump.maxSpeed);
-        if (this._targetSpeed !== _newSpeed) logger.info(`NCP: Setting Pump ${this.pump.name} to ${_newSpeed} RPM.`);
+        if (this._targetSpeed !== newSpeed) logger.info(`NCP: Setting Pump ${this.pump.name} to ${newSpeed} RPM.`);
     }
     public async setServiceModeAsync() {
         this._targetSpeed = 0;
         await this.setPumpRPMAsync();
     }
-    public async setDriveStateAsync(running: boolean = false) { return Promise.resolve(); }
-    public async setPumpStateAsync(pstate: PumpState) {
+    public async setDriveStateAsync(isRunning: boolean = false) { return Promise.resolve(); }
+    public async setPumpStateAsync(pumpState: PumpState) {
         // Don't poll while we are seting the state.
         this.suspendPolling = true;
         try {
@@ -924,11 +950,11 @@ export class NixiePumpHWVS extends NixiePumpRS485 {
     };
     protected async requestPumpStatusAsync() { return Promise.resolve(); };
     protected setPumpFeatureAsync(feature?: number) { return Promise.resolve(); }
-    protected async setPumpToRemoteControlAsync(running: boolean = true) {
+    protected async setPumpToRemoteControlAsync(isRunning: boolean = true) {
         try {
             // We do nothing on this pump to set it to remote control.  That is unless we are turning it off.
             if (conn.isPortEnabled(this.pump.portId || 0)) {
-                if (!running) {
+                if (!isRunning) {
                     let out = Outbound.create({
                         portId: this.pump.portId || 0,
                         protocol: Protocol.Hayward,
@@ -963,14 +989,14 @@ export class NixiePumpHWVS extends NixiePumpRS485 {
         // So in essence for equipment item 0-16 (pump addresses) the outbound is really a broadcast on 12 (broadcast) from 1 and the inbound is
         // broadcast from the equipment item to 0 (anybody).
         if (conn.isPortEnabled(this.pump.portId || 0)) {
-            let pt = sys.board.valueMaps.pumpTypes.get(this.pump.type);
+            let pumpType = sys.board.valueMaps.pumpTypes.get(this.pump.type);
             let out = Outbound.create({
                 portId: this.pump.portId || 0,
                 protocol: Protocol.Hayward,
                 source: 1, // Use the broadcast address
                 dest: this.pump.address - 96,
                 action: 12,
-                payload: [Math.min(Math.round((this._targetSpeed / pt.maxSpeed) * 100), 100)], // when stopAsync is called, pass false to return control to pump panel
+                payload: [Math.min(Math.round((this._targetSpeed / pumpType.maxSpeed) * 100), 100)], // when stopAsync is called, pass false to return control to pump panel
                 retries: 1,
                 response: Response.create({ protocol: Protocol.Hayward, action: 12, source: this.pump.address - 96 })
             });
@@ -979,18 +1005,213 @@ export class NixiePumpHWVS extends NixiePumpRS485 {
             }
             catch (err) {
                 logger.error(`Error sending setPumpRPM for ${this.pump.name}: ${err.message}`);
-                let pstate = state.pumps.getItemById(this.pump.id);
-                pstate.command = 0;
-                pstate.rpm = 0;
-                pstate.watts = 0;
+                let pumpState = state.pumps.getItemById(this.pump.id);
+                pumpState.command = 0;
+                pumpState.rpm = 0;
+                pumpState.watts = 0;
             }
         }
         else {
-            let pstate = state.pumps.getItemById(this.pump.id);
-            pstate.command = 0;
-            pstate.rpm = 0;
-            pstate.watts = 0;
+            let pumpState = state.pumps.getItemById(this.pump.id);
+            pumpState.command = 0;
+            pumpState.rpm = 0;
+            pumpState.watts = 0;
         }
 
     };
+}
+
+export class NixiePumpRegalModbus extends NixiePump {
+
+    constructor(ncp: INixieControlPanel, pump: Pump) {
+        super(ncp, pump);
+        // this.pump = pump;
+        // this._targetSpeed = 0;
+    }
+
+    public setTargetSpeed(pumpState: PumpState) {
+        let newSpeed = 0;
+        if (!pumpState.pumpOnDelay) {
+            let circuitConfigs = this.pump.circuits.get();
+            for (let i = 0; i < circuitConfigs.length; i++) {
+                let circuitConfig = circuitConfigs[i];
+                let circ = state.circuits.getInterfaceById(circuitConfig.circuit);
+                if (circ.isOn) newSpeed = Math.max(newSpeed, circuitConfig.speed);
+            }
+        }
+        if (isNaN(newSpeed)) newSpeed = 0;
+        this._targetSpeed = newSpeed;
+        if (this._targetSpeed !== 0) Math.min(Math.max(this.pump.minSpeed, this._targetSpeed), this.pump.maxSpeed);
+        if (this._targetSpeed !== newSpeed) logger.info(`NCP: Setting Pump ${this.pump.name} to ${newSpeed} RPM.`);
+    }
+    
+    public async setServiceModeAsync() {
+        this._targetSpeed = 0;
+        await this.setDriveStateAsync(false);
+        // await this.setPumpToRemoteControlAsync(false);
+    }
+
+    public async setPumpStateAsync(pstate: PumpState) {
+        // Don't poll while we are seting the state.
+        this.suspendPolling = true;
+        try {
+            let pt = sys.board.valueMaps.pumpTypes.get(this.pump.type);
+            if (state.mode === 0) {
+                // Since these process are async the closing flag can be set
+                // between calls.  We need to check it in between each call.
+                if (!this.closing) {
+                    if (this._targetSpeed >= pt.minSpeed && this._targetSpeed <= pt.maxSpeed) await this.setPumpRPMAsync();
+                }
+                if (!this.closing) await this.setDriveStateAsync();
+                ;
+                // if (!this.closing && pt.name !== 'vsf' && pt.name !== 'vs') await this.setPumpFeatureAsync(6);;
+                if (!this.closing) await setTimeout(1000);;
+                if (!this.closing) await this.requestPumpStatusAsync();;
+                // if (!this.closing) await this.setPumpToRemoteControlAsync();;
+            }
+            return new InterfaceServerResponse(200, 'Success');
+        }
+        catch (err) {
+            logger.error(`Error running pump sequence for ${this.pump.name}: ${err.message}`);
+            return Promise.reject(err);
+        }
+        finally { this.suspendPolling = false; }
+    };
+    protected async setDriveStateAsync(isRunning: boolean = true) {
+        let functionCode = this._targetSpeed > 0 ? 0x41 : 0x42;
+        logger.debug(`NixiePumpRegalModbus: setDriveStateAsync ${this.pump.name} ${functionCode == 0x41 ? 'RUN' : functionCode == 0x42 ? 'STOP' : 'UNKNOWN'}`);
+        try {
+            if (conn.isPortEnabled(this.pump.portId || 0)) {
+                let functionCode = this._targetSpeed > 0 ? 0x41 : 0x42;
+                let out = Outbound.create({
+                    portId: this.pump.portId || 0,
+                    protocol: Protocol.RegalModbus,
+                    dest: this.pump.address,
+                    action: functionCode,
+                    payload: [],
+                    retries: 1,
+                    response: true
+                });
+                try {
+                    await out.sendAsync();
+                }
+                catch (err) {
+                    logger.error(`Error sending setDriveState for ${this.pump.name}: ${err.message}`);
+                }
+            }
+            else {
+                let pumpState = state.pumps.getItemById(this.pump.id);
+                pumpState.command = pumpState.rpm > 0 || pumpState.flow > 0 ? 10 : 0;  // dashPanel needs this to be set to 10 for running.
+            }
+        } catch (err) { logger.error(`Error setting driveState for ${this.pump.name}: ${err.message}`); }
+    };
+
+    protected async requestPumpDriveStateAsync() {
+        if (conn.isPortEnabled(this.pump.portId || 0)) {
+            let out = Outbound.create({
+                portId: this.pump.portId || 0,
+                protocol: Protocol.RegalModbus,
+                dest: this.pump.address,
+                action: 0x43,
+                payload: [],
+                retries: 2,
+                response: true,
+            });
+            try {
+                await out.sendAsync();
+            }
+            catch (err) {
+                logger.error(`Error sending requestPumpDriveState for ${this.pump.name}: ${err.message}`);
+            }
+        }
+    }
+
+    protected async requestSensorAsync(page: number, sensorAddr: number, retries: number = 2) {
+        if (conn.isPortEnabled(this.pump.portId || 0)) {
+            let out = Outbound.create({
+                portId: this.pump.portId || 0,
+                protocol: Protocol.RegalModbus,
+                dest: this.pump.address,
+                action: 0x45,
+                payload: [page, sensorAddr],
+                retries: retries,
+                response: true,
+            });
+            try {
+                await out.sendAsync();
+            }
+            catch (err) {
+                logger.error(`Error sending requestSensor for ${this.pump.name} page ${page} sensor ${sensorAddr}: ${err.message}`);
+            }
+        }
+    }
+
+    protected async requestPumpStatusAsync() {
+
+        await this.requestPumpDriveStateAsync();
+        await this.requestSensorAsync(0, 0x00);  // motor speed
+        await this.requestSensorAsync(0, 0x01);  // motor current
+        // await this.requestSensorAsync(0, 0x04);  // torque
+        // await this.requestSensorAsync(0, 0x05);  // inverter input power
+        // await this.requestSensorAsync(0, 0x06);  // DC bus voltage
+        // await this.requestSensorAsync(0, 0x07);  // ambient temperature
+        // await this.requestSensorAsync(0, 0x0A);  // output power
+        // await this.requestSensorAsync(0, 0x0D);  // motor line voltage
+        // await this.requestSensorAsync(0, 0x0E);  // ramp status
+        // await this.requestSensorAsync(0, 0x0F);  // no of total fault
+        // await this.requestSensorAsync(0, 0x10);  // prime status
+        // await this.requestSensorAsync(0, 0x11);  // motor input power
+        // await this.requestSensorAsync(0, 0x12);  // IGBT temperature
+        // await this.requestSensorAsync(0, 0x13);  // PCB temperature
+    };
+
+    protected async setPumpRPMAsync() {
+        logger.debug(`NixiePumpRegalModbus: setPumpRPMAsync ${this.pump.name} ${this._targetSpeed}`);
+        if (conn.isPortEnabled(this.pump.portId || 0)) {
+            // get demand bytes from rpm
+            const mode = 0x00; // 0x00 for speed control mode
+            const demandLo = Math.round(this._targetSpeed * 4) & 0xFF;
+            const demandHi = (Math.round(this._targetSpeed * 4) >> 8) & 0xFF;
+            let out = Outbound.create({
+                portId: this.pump.portId || 0,
+                protocol: Protocol.RegalModbus,
+                dest: this.pump.address,
+                action: 0x44,
+                payload: [mode, demandLo, demandHi],
+                retries: 1,
+                // timeout: 250,
+                response: true
+            });
+            try {
+                await out.sendAsync();
+            }
+            catch (err) {
+                logger.error(`Error sending setPumpRPMAsync for ${this.pump.name}: ${err.message}`);
+            }
+        }
+    };
+    public async closeAsync() {
+        try {
+            this.suspendPolling = true;
+            logger.info(`Nixie Pump closing ${this.pump.name}.`)
+            if (typeof this._pollTimer !== 'undefined' || this._pollTimer) clearTimeout(this._pollTimer);
+            this._pollTimer = null;
+            this.closing = true;
+            let pumpType = sys.board.valueMaps.pumpTypes.get(this.pump.type);
+            let pumpState = state.pumps.getItemById(this.pump.id);
+            this._targetSpeed = 0;
+            await this.setDriveStateAsync(false);
+            // if (!this.closing && pt.name !== 'vsf' && pt.name !== 'vs') await this.setPumpFeatureAsync();
+            //await this.setPumpFeature(); 
+            //await this.setDriveStateAsync(false); 
+            // await this.setPumpToRemoteControlAsync(false);
+            // Make sure the polling timer is dead after we have closed this all off.  That way we do not
+            // have another process that revives it from the dead.
+            if (typeof this._pollTimer !== 'undefined' || this._pollTimer) clearTimeout(this._pollTimer);
+            this._pollTimer = null;
+            pumpState.emitEquipmentChange();
+        }
+        catch (err) { logger.error(`Nixie Pump closeAsync: ${err.message}`); return Promise.reject(err); }
+        finally { this.suspendPolling = false; }
+    }
 }
