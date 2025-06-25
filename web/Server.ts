@@ -48,6 +48,7 @@ import express = require('express');
 import extend = require("extend");
 import { setTimeout as setTimeoutSync } from 'timers';
 import { setTimeout } from 'timers/promises';
+const bonjour = require('bonjour');
 
 // This class serves data and pages for
 // external interfaces as well as an internal dashboard.
@@ -996,93 +997,44 @@ export class SsdpServer extends ProtoServer {
     }
 }
 export class MdnsServer extends ProtoServer {
-    // Multi-cast DNS server
-    public server;
+    private bonjourService: any;
     public mdnsEmitter = new EventEmitter();
-    private queries = [];
+    private service: any;
     public async init(cfg) {
         this.uuid = cfg.uuid;
         if (cfg.enabled) {
-            logger.info('Starting up MDNS server');
-            this.server = multicastdns({ loopback: true });
-            var self = this;
-
-            // look for responses to queries we send
-            // todo: need timeout on queries to remove them in case a bad query is sent
-            this.server.on('response', function (responses) {
-                self.queries.forEach(function (query) {
-                    logger.silly(`looking to match on ${query.name}`);
-                    responses.answers.forEach(answer => {
-                        if (answer.name === query.name) {
-                            logger.info(`MDNS: found response: ${answer.name} at ${answer.data}`);
-                            // need to send response back to client here
-                            self.mdnsEmitter.emit('mdnsResponse', answer);
-                            // remove query from list
-                            self.queries = self.queries.filter((value, index, arr) => {
-                                if (value.name !== query.name) return arr;
-                            });
-                        }
-                    });
-
-                });
+            logger.info('Starting up MDNS server (bonjour)');
+            this.bonjourService = bonjour();
+            this.service = this.bonjourService.publish({
+                name: 'njsPC',
+                type: 'poolcontroller',
+                port: webApp.httpPort(),
+                host: os.hostname() + '.local',
+                txt: {
+                    model: 'njsPC'
+                }
+            });;
+            this.service.on('up', () => {
+                logger.info(`Published njsPC._poolcontroller._tcp.local on ${os.hostname()}.local`);
+                this.isRunning = true;
             });
-
-            // respond to incoming MDNS queries
-            this.server.on('query', function (query) {
-                query.questions.forEach(question => {
-                    if (question.name === '_poolcontroller._tcp.local') {
-                        logger.info(`received mdns query for nodejs_poolController`);
-                        self.server.respond({
-                            answers: [
-                                {
-                                    name: '_poolcontroller._tcp.local',
-                                    type: 'A',
-                                    ttl: 300,
-                                    data: webApp.ip()
-                                },
-                                {
-                                    name: '_poolcontroller._tcp.local',
-                                    type: 'SRV',
-                                    data: {
-                                        port: webApp.httpPort().toString(),
-                                        target: '_poolcontroller._tcp.local',
-                                        weight: 0,
-                                        priority: 10
-                                    }
-                                },
-                                {
-                                    name: 'model',
-                                    type: 'TXT',
-                                    data: 'njsPC'
-                                },
-                            ]
-                        });
-                    }
-                });
-            });
-
-            this.isRunning = true;
         }
     }
     public queryMdns(query) {
-        // sample query
-        // queryMdns({name: '_poolcontroller._tcp.local', type: 'A'});
-        if (this.queries.indexOf(query) === -1) {
-            this.queries.push(query);
-        }
-        this.server.query({ questions: [query] });
+        // bonjour supports browsing for services
+        const browser = this.bonjourService.find({ type: 'poolcontroller' });
+        browser.on('up', (service) => {
+            this.mdnsEmitter.emit('mdnsResponse', service);
+        });
     }
     public async stopAsync() {
         try {
-            if (typeof this.server !== 'undefined')
-                await new Promise<void>((resolve, reject) => {
-                    this.server.destroy((err) => {
-                        if (err) reject(err);
-                        else resolve();
-                    });
-                });
+            if (this.service) this.service.stop();
+            if (this.bonjourService) this.bonjourService.destroy();
             logger.info(`Shut down MDNS Server ${this.name}`);
-        } catch (err) { logger.error(`Error shutting down MDNS Server ${this.name}: ${err.message}`); }
+        } catch (err) {
+            logger.error(`Error shutting down MDNS Server ${this.name}: ${err.message}`);
+        }
     }
 }
 export class HttpInterfaceServer extends ProtoServer {
@@ -1238,14 +1190,7 @@ export class RuleInterfaceServer extends ProtoServer {
             this.bindings.bindEvent(evt, ...data);
         }
     }
-    public async stopAsync() {
-        try {
-            logger.info(`${this.name} Interface Server Shut down`);
-        }
-        catch (err) { }
-    }
 }
-
 export class InfluxInterfaceServer extends ProtoServer {
     public bindingsPath: string;
     public bindings: InfluxInterfaceBindings;
