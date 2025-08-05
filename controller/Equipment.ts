@@ -2663,3 +2663,7 @@ export class Screenlogic extends EqItem {
 
 }
 export let sys = new PoolSystem();
+
+if (process.env.NODE_ENV === 'development') {
+    (globalThis as any).sys = sys;
+}
