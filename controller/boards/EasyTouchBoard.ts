@@ -1218,6 +1218,26 @@ class TouchSystemCommands extends SystemCommands {
     }
 }
 class TouchBodyCommands extends BodyCommands {
+    public getHeatSources(bodyId: number) {
+        let heatSources = super.getHeatSources(bodyId);
+        for (let i = 0; i < heatSources.length; i++) {
+            let hm = heatSources[i];
+            if (hm?.name === 'ultratemp' && typeof hm.val === 'undefined') {
+                heatSources[i] = this.board.valueMaps.heatSources.transformByName('heatpump');
+            }
+        }
+        return heatSources;
+    }
+    public getHeatModes(bodyId: number) {
+        let heatModes = super.getHeatModes(bodyId);
+        for (let i = 0; i < heatModes.length; i++) {
+            let hm = heatModes[i];
+            if (hm?.name === 'ultratemp' && typeof hm.val === 'undefined') {
+                heatModes[i] = this.board.valueMaps.heatModes.transformByName('heatpump');
+            }
+        }
+        return heatModes;
+    }
     public async setBodyAsync(obj: any): Promise<Body> {
         // The 168 is a funky packet in *Touch because it can set:
         // * Intellichem Installed (byte 3, bit 1)
@@ -2701,12 +2721,18 @@ class TouchHeaterCommands extends HeaterCommands {
         let heaters = sys.heaters.get();
         let types = sys.board.valueMaps.heaterTypes.toArray();
         let inst = { total: 0 };
-        // When an NCP-controlled (master=1) ultratemp exists, it replaces the OCP's
-        // ghost heaters (hybrid/ultratemp/solar) for heat-mode purposes.
-        let hasNcpUltratemp = heaters.some(h => {
-            let t = types.find(elem => elem.val === h.type);
-            return t && (t.name === 'ultratemp' || t.name === 'heatpump') && h.master === 1;
-        });
+        // If NCP directly controls an ultratemp/heatpump for the same body, suppress
+        // corresponding OCP ghost entries for that body only.
+        let hasNcpUltratempForBody = (ocpHeater: Heater): boolean => {
+            let ocpBody = typeof ocpHeater.body === 'number' ? ocpHeater.body : 32;
+            return heaters.some(h => {
+                if (h.master !== 1 || h.isActive === false) return false;
+                let t = types.find(elem => elem.val === h.type);
+                if (!t || (t.name !== 'ultratemp' && t.name !== 'heatpump')) return false;
+                let ncpBody = typeof h.body === 'number' ? h.body : 32;
+                return ncpBody === 32 || ocpBody === 32 || ncpBody === ocpBody;
+            });
+        };
         for (let i = 0; i < types.length; i++) if (types[i].name !== 'none') inst[types[i].name] = 0;
         for (let i = 0; i < heaters.length; i++) {
             let heater = heaters[i];
@@ -2715,8 +2741,9 @@ class TouchHeaterCommands extends HeaterCommands {
             }
             let type = types.find(elem => elem.val === heater.type);
             if (typeof type !== 'undefined') {
-                // Skip OCP ghost heaters when NCP directly controls an ultratemp/heatpump.
-                if (hasNcpUltratemp && heater.master === 0 && (type.name === 'hybrid' || type.name === 'ultratemp' || type.name === 'solar')) continue;
+                // Skip OCP ghost heaters only when there is a matching NCP-controlled
+                // ultratemp/heatpump for this heater's body.
+                if (heater.master === 0 && (type.name === 'hybrid' || type.name === 'ultratemp' || type.name === 'solar') && hasNcpUltratempForBody(heater)) continue;
                 if (inst[type.name] === 'undefined') inst[type.name] = 0;
                 inst[type.name] = inst[type.name] + 1;
                 if (heater.coolingEnabled === true && type.hasCoolSetpoint === true) inst['hasCoolSetpoint'] = true;

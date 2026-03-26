@@ -1803,8 +1803,6 @@ export class BodyCommands extends BoardCommands {
         }
         if (heatTypes.ultratemp > 0) {
             let hm = this.board.valueMaps.heatSources.transformByName('ultratemp');
-            // EasyTouch with standalone ultratemp (no gas) uses 'heatpump' source instead of 'ultratemp'
-            if (typeof hm.val === 'undefined') hm = this.board.valueMaps.heatSources.transformByName('heatpump');
             heatSources.push(hm);
             if (heatTypes.total > 1) heatSources.push(this.board.valueMaps.heatSources.transformByName('ultratemppref'));
         }
@@ -1848,8 +1846,6 @@ export class BodyCommands extends BoardCommands {
         }
         if (heatTypes.ultratemp > 0) {
             let hm = this.board.valueMaps.heatModes.transformByName('ultratemp');
-            // EasyTouch with standalone ultratemp (no gas) uses 'heatpump' mode instead of 'ultratemp'
-            if (typeof hm.val === 'undefined') hm = this.board.valueMaps.heatModes.transformByName('heatpump');
             heatModes.push(hm);
             if (heatTypes.total > 1) heatModes.push(this.board.valueMaps.heatModes.transformByName('ultratemppref'));
         }
