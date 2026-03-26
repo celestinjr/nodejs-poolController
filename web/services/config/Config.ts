@@ -359,6 +359,7 @@ export class ConfigRoute {
                     maxHeaters: sys.equipment.maxHeaters,
                     heaters: sys.heaters.get(),
                     heaterTypes: sys.board.valueMaps.heaterTypes.toArray(),
+                    equipmentMasters: sys.board.valueMaps.equipmentMaster.toArray(),
                     // Align with `/config/body/:id/heatModes` (body picklist). This ensures any board-specific
                     // filtering (e.g. IntelliCenter v3 preferred-mode suppression) is reflected consistently.
                     // Future improvement should return valid modes per body.

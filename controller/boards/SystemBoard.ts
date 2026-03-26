@@ -4059,7 +4059,7 @@ export class HeaterCommands extends BoardCommands {
     public updateHeaterServices() {
         let htypes = sys.board.heaters.getInstalledHeaterTypes();
         let solarInstalled = htypes.solar > 0;
-        let heatPumpInstalled = htypes.heatpump > 0;
+        let heatPumpInstalled = htypes.heatpump > 0 || htypes.ultratemp > 0;
         let gasHeaterInstalled = htypes.gas > 0;
         if (sys.heaters.length > 0) sys.board.valueMaps.heatSources = new byteValueMap([[0, { name: 'off', desc: 'Off' }]]);
         if (gasHeaterInstalled) sys.board.valueMaps.heatSources.set(3, { name: 'heater', desc: 'Heater' });
@@ -4250,6 +4250,9 @@ export class HeaterCommands extends BoardCommands {
                     // so that if we have a heater preference set up then we do not have to evaluate the other heater.
                     let heaterTypes = sys.board.valueMaps.heaterTypes;
                     bodyHeaters.sort((a, b) => {
+                        // Sort master=1 (NCP-controlled) heaters before master=0 (OCP-controlled)
+                        // so directly controlled heaters get priority over OCP ghosts.
+                        if (a.master !== b.master) return b.master - a.master;
                         if (heaterTypes.transform(a.type).hasPreference) return -1;
                         else if (heaterTypes.transform(b.type).hasPreference) return 1;
                         return 0;
@@ -4327,11 +4330,11 @@ export class HeaterCommands extends BoardCommands {
                                         // This is the default operation on IntelliCenter and it appears to simply not start on the setpoint.  We can do better
                                         // than this by heating 1 degree past the setpoint then applying this rule for 30 minutes.  This allows for a more
                                         // responsive heater.
-                                        // 
+                                        //
                                         // For Ultratemp we need to determine whether the differential temp
                                         // is within range.  The other thing that needs to be calculated here is
                                         // whether Ultratemp can effeciently heat the pool.
-                                        if (mode === 'ultratemp' || mode === 'ultratemppref') {
+                                        if (mode === 'ultratemp' || mode === 'ultratemppref' || mode === 'heatpump' || mode === 'heatpumppref') {
                                             if (hstate.isOn) {
                                                 // For the preference mode we will try to reach the setpoint for a period of time then
                                                 // switch over to the gas heater.  Our algorithm for this is to check the rate of
