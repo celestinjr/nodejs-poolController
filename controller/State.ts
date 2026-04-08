@@ -542,6 +542,8 @@ export interface ICircuitState {
     get(bCopy?: boolean);
     showInFeatures?: boolean;
     isActive?: boolean;
+    level?: number;
+    color?: { red: number; green: number; blue: number };
     startDelay?: boolean;
     stopDelay?: boolean;
     manualPriorityActive?: boolean;
@@ -2074,6 +2076,11 @@ export class CircuitState extends EqState implements ICircuitState {
     }
     public get level(): number { return this.data.level; }
     public set level(val: number) { this.setDataVal('level', val); }
+    public get color(): { red: number; green: number; blue: number } { return this.data.color; }
+    public set color(val: { red: number; green: number; blue: number }) {
+        if (typeof val === 'undefined' || val === null) this.setDataVal('color', undefined);
+        else this.setDataVal('color', { red: val.red, green: val.green, blue: val.blue });
+    }
     public get commStatus(): number { return this.data.commStatus; }
     public set commStatus(val: number) {
         if (this.commStatus !== val) {

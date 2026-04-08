@@ -2630,6 +2630,9 @@ export class CircuitCommands extends BoardCommands {
         circ.level = level;
         return Promise.resolve(circ as ICircuitState);
     }
+    public setLightColorAsync(id: number, color: { red: number; green: number; blue: number }): Promise<ICircuitState> {
+        return Promise.reject(new InvalidOperationError(`Light color control is not supported for circuit ${id}`, 'setLightColorAsync'));
+    }
     public getCircuitReferences(includeCircuits?: boolean, includeFeatures?: boolean, includeVirtual?: boolean, includeGroups?: boolean) {
         let arrRefs = [];
         if (includeCircuits) {

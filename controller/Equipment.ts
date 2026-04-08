@@ -1465,6 +1465,7 @@ export interface ICircuit {
     freeze?: boolean;
     isActive: boolean;
     lightingTheme?: number;
+    level?: number;
     //showInCircuits?: boolean;
     showInFeatures?: boolean;
     macro?: boolean;

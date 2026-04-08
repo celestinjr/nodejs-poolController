@@ -253,7 +253,7 @@ export class NixieBoard extends SystemBoard {
             [64, { name: 'violet', desc: 'Violet', types: ['watercolors'], sequence: 9 }],
             [65, { name: 'slowcolorsplash', desc: 'Slow Color Splash', types: ['watercolors'], sequence: 10 }],
             [66, { name: 'fastcolorsplash', desc: 'Fast Color Splash', types: ['watercolors'], sequence: 11 }],
-            [67, { name: 'americathebeautiful', desc: 'America the Beautiful', types: ['watercolors'], sequence: 12 }],
+            [67, { name: 'americathebeautiful', desc: 'America Beautiful', types: ['watercolors'], sequence: 12 }],
             [68, { name: 'fattuesday', desc: 'Fat Tuesday', types: ['watercolors'], sequence: 13 }],
             [69, { name: 'discotech', desc: 'Disco Tech', types: ['watercolors'], sequence: 14 }],
             [255, { name: 'none', desc: 'None' }]
