@@ -386,17 +386,25 @@ export class Inbound extends Message {
     }
     private testRegalModbusHeader(bytes: number[], ndx: number): boolean {
         // RegalModbus protocol: header, function, ack, payload, crcLo, crcHi
+        // Only accept messages from known RegalModbus pumps to avoid misidentifying noise/Broadcast fragments
         if (bytes.length > ndx + 3 && sys.controllerType === 'nixie') {
-            // address must be in the range 0x15 to 0xF7
-            // function code must be in the range 0x00 to 0x7F
-            // ack must be in 0x10, 0x20, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x09, 0x0A
             let addr = bytes[ndx];
             let func = bytes[ndx + 1];
             let ack = bytes[ndx + 2];
             let acceptableAcks = [0x10, 0x20, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x09, 0x0A];
 
-            // logger.debug('Testing RegalModbus header', bytes, addr, func, ack, acceptableAcks.includes(ack));
-            // logger.debug(`Current bytes: ${JSON.stringify(bytes)}`);
+            // First check if address matches a configured RegalModbus pump
+            let pumps = sys.pumps.get();
+            let isKnownPump = false;
+            for (let pump of pumps) {
+                if (pump.type === 200 && pump.address === addr) {
+                    isKnownPump = true;
+                    break;
+                }
+            }
+            if (!isKnownPump) {
+                return false;
+            }
 
             if (addr >= 0x15 && addr <= 0xF7 && func >= 0x00 && func <= 0x7F && acceptableAcks.includes(ack) &&
                 this.isAddressForPumpType(addr, 'regalmodbus', ['neptunemodbus'])) {
