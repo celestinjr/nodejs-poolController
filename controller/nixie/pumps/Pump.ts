@@ -1061,9 +1061,8 @@ export class NixiePumpRegalModbus extends NixiePump {
         finally { this.suspendPolling = false; }
     };
     protected async setDriveStateAsync(isRunning: boolean = true) {
-        // Go command starts the motor spinning. The Set Demand command must be sent first. If the motor is
-        // already running, the Go command is ignored. If the motor is in the fault mode, NACK response with the
-        // "General Failure" NACK code is replied back
+        // Go command starts the motor spinning. Set Demand must be sent first. If the motor is already running, Go is ignored.
+        // In fault mode the drive may NACK Go/Stop; see RegalModbusStateMessage NACK handling.
         let functionCode = this._targetSpeed > 0 ? 0x41 : 0x42;
         logger.debug(`NixiePumpRegalModbus: setDriveStateAsync ${this.pump.name} ${functionCode == 0x41 ? 'RUN' : functionCode == 0x42 ? 'STOP' : 'UNKNOWN'}`);
         try {

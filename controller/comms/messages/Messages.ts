@@ -386,25 +386,16 @@ export class Inbound extends Message {
     }
     private testRegalModbusHeader(bytes: number[], ndx: number): boolean {
         // RegalModbus protocol: header, function, ack, payload, crcLo, crcHi
-        // Only accept messages from known RegalModbus pumps to avoid misidentifying noise/Broadcast fragments
+        // Only accept messages from configured Regal Modbus pumps (by address) to avoid misidentifying noise/broadcast fragments
         if (bytes.length > ndx + 3 && sys.controllerType === 'nixie') {
             let addr = bytes[ndx];
+            const regalType = sys.board.valueMaps.pumpTypes.getValue('regalmodbus');
+            if (typeof sys.pumps.find(p => p.address === addr && p.type === regalType) === 'undefined') {
+                return false;
+            }
             let func = bytes[ndx + 1];
             let ack = bytes[ndx + 2];
             let acceptableAcks = [0x10, 0x20, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x09, 0x0A];
-
-            // First check if address matches a configured RegalModbus pump
-            let pumps = sys.pumps.get();
-            let isKnownPump = false;
-            for (let pump of pumps) {
-                if (pump.type === 200 && pump.address === addr) {
-                    isKnownPump = true;
-                    break;
-                }
-            }
-            if (!isKnownPump) {
-                return false;
-            }
 
             if (addr >= 0x15 && addr <= 0xF7 && func >= 0x00 && func <= 0x7F && acceptableAcks.includes(ack) &&
                 this.isAddressForPumpType(addr, 'regalmodbus', ['neptunemodbus'])) {
