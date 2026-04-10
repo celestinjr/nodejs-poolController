@@ -2685,16 +2685,9 @@ export class CircuitCommands extends BoardCommands {
     public getCircuitFunctions() {
         let cf = sys.board.valueMaps.circuitFunctions.toArray();
         if (!sys.equipment.shared) cf = cf.filter(x => { return x.name !== 'spillway' && x.name !== 'spadrain' });
-        const poolType = sys.board.valueMaps.circuitFunctions.findItem('pool');
-        const spaType = sys.board.valueMaps.circuitFunctions.findItem('spa');
-        if (typeof poolType !== 'undefined') {
-            const hasPool = typeof sys.circuits.find(elem => elem.isActive !== false && elem.type === poolType.val) !== 'undefined';
-            if (hasPool) cf = cf.filter(x => x.name !== 'pool');
-        }
-        if (typeof spaType !== 'undefined') {
-            const hasSpa = typeof sys.circuits.find(elem => elem.isActive !== false && elem.type === spaType.val) !== 'undefined';
-            if (hasSpa) cf = cf.filter(x => x.name !== 'spa');
-        }
+        // Do not omit pool/spa from this list when a pool/spa circuit already exists. The same payload is used to
+        // label the current circuit type in config UIs; filtering here makes the Pool/Spa row look blank/disabled.
+        // Uniqueness is enforced in assertSinglePoolSpaType when saving.
         return cf;
     }
     public getCircuitNames() { return [...sys.board.valueMaps.circuitNames.toArray(), ...sys.board.valueMaps.customNames.toArray()]; }
