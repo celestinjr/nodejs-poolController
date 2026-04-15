@@ -251,13 +251,20 @@ export class EquipmentStateMessage {
                                 if ((msg.extractPayloadByte(2) & 0x20) === 32) {
                                     tbody.temp = state.temps.waterSensor1;
                                     tbody.isOn = true;
-                                } else tbody.isOn = false;
+                                } else {
+                                    // Keep body temp visible even when body is currently off.
+                                    tbody.temp = state.temps.waterSensor1;
+                                    tbody.isOn = false;
+                                }
                             }
                             else if (state.circuits.getItemById(6).isOn === true) {
                                 tbody.temp = state.temps.waterSensor1;
                                 tbody.isOn = true;
                             }
-                            else tbody.isOn = false;
+                            else {
+                                tbody.temp = state.temps.waterSensor1;
+                                tbody.isOn = false;
+                            }
                         }
                         if (sys.bodies.length > 1) {
                             const tbody: BodyTempState = state.temps.bodies.getItemById(2, true);
@@ -271,12 +278,19 @@ export class EquipmentStateMessage {
                                 if ((msg.extractPayloadByte(2) & 0x01) === 1) {
                                     tbody.temp = sys.equipment.shared ? state.temps.waterSensor1 : state.temps.waterSensor2;
                                     tbody.isOn = true;
-                                } else tbody.isOn = false;
+                                } else {
+                                    // Keep body temp visible even when body is currently off.
+                                    tbody.temp = sys.equipment.shared ? state.temps.waterSensor1 : state.temps.waterSensor2;
+                                    tbody.isOn = false;
+                                }
                             } else if (state.circuits.getItemById(1).isOn === true) {
                                 tbody.temp = sys.equipment.shared ? state.temps.waterSensor1 : state.temps.waterSensor2;
                                 tbody.isOn = true;
                             }
-                            else tbody.isOn = false;
+                            else {
+                                tbody.temp = sys.equipment.shared ? state.temps.waterSensor1 : state.temps.waterSensor2;
+                                tbody.isOn = false;
+                            }
                         }
                         if (sys.bodies.length > 2) {
                             state.temps.waterSensor3 = fnTempFromByte(msg.extractPayloadByte(20));
@@ -600,12 +614,21 @@ export class EquipmentStateMessage {
                 break;
             case 179: {
                 // v3.004+ Action 179 - Heartbeat REQUEST from OCP
-                // OCP sends Action 179 TO specific device (dest=33 for njsPC, dest=36 for wireless)
+                // OCP sends Action 179 TO a specific registered device.
                 // Device must respond with Action 180 TO OCP (dest=16)
-                if (msg.dest === Message.pluginAddress) {
+                let registrationAddress = Message.pluginAddress;
+                if (sys.controllerType === ControllerType.IntelliCenter) {
+                    const board = sys.board as IntelliCenterBoard;
+                    registrationAddress = board.getRegistrationAddress();
+                    if (board.isOwnHeartbeatPayload(msg.payload) && msg.dest !== registrationAddress) {
+                        logger.warn(`Ignoring IntelliCenter v3 heartbeat for device ${msg.dest}; expected device ${registrationAddress}.`);
+                    }
+                }
+                if (msg.dest === registrationAddress) {
                     // OCP is pinging us specifically - respond with Action 180
                     logger.silly(`Received heartbeat request (Action 179) from OCP, responding with Action 180`);
                     const response: Outbound = Outbound.create({
+                        source: registrationAddress,
                         dest: 16,  // Respond to OCP (16)
                         action: 180,  // Action 180 = heartbeat response
                         payload: Array(16).fill(0),  // 16 zeros (observed from wireless remote)
@@ -619,6 +642,15 @@ export class EquipmentStateMessage {
                 msg.isProcessed = true;
                 break;
             }
+            case 253: {
+                // v3.004+ registration confirmation. Use it to learn the live device address,
+                // but keep Action 217 as the registration-status source of truth.
+                if (sys.controllerType === ControllerType.IntelliCenter) {
+                    (sys.board as IntelliCenterBoard).processRegistrationMessage(msg);
+                }
+                msg.isProcessed = true;
+                break;
+            }
             case 184: {
                 msg.isProcessed = true;
                 break;
@@ -627,13 +659,10 @@ export class EquipmentStateMessage {
                 // v3.004+ Action 217 - Device list broadcast
                 // OCP broadcasts registered devices after Action 251→253 handshake
                 // Each packet contains info for ONE device
-                // Check if this packet is for njsPC (device 33) and update registration status
-                if (msg.payload.length > 2 && msg.extractPayloadByte(0) === Message.pluginAddress) {
-                    const registrationStatus = msg.extractPayloadByte(2);
-                    // status: 0=unknown, 1=registered, 4=stale/needs-reauth (NOT rejection)
-                    if (sys.controllerType === ControllerType.IntelliCenter) {
-                        (sys.board as IntelliCenterBoard).setRegistrationStatus(registrationStatus);
-                    }
+                // Match by registration identity, not the current assumed address, because the OCP
+                // can assign a different runtime device address during bootstrap.
+                if (sys.controllerType === ControllerType.IntelliCenter) {
+                    (sys.board as IntelliCenterBoard).processRegistrationMessage(msg);
                 }
                 msg.isProcessed = true;
                 break;

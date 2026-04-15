@@ -173,6 +173,19 @@ If you find yourself writing `if (sys.controllerType === ...)` inside `SystemBoa
 - Periodically review and delete outdated/superseded files
 - **When completing work:** Update the EXISTING plan file with status, don't create new "_COMPLETE" files
 
+### 8.1 Packet-Specific Learnings Location (CRITICAL)
+**Rule:** Never add packet-specific learnings/evidence to `AGENTS.md`.
+- `AGENTS.md` is for durable, cross-cutting coding/process rules only.
+- Put packet-level findings, offsets, per-capture discoveries, and protocol examples in `.plan/` documentation.
+- If the packet finding is a tracked defect/regression workflow item, record it in a `/plan-qa` issue instead.
+- If a proposed AGENTS update is packet-specific, STOP and redirect it to `.plan/` or `/plan-qa`.
+
+### 8.2 `/plan-qa` Issue Storage Location (MANDATORY)
+**Rule:** For this repository, any issues analyzed/tracked via `/plan-qa` must be stored in the `.plan/` folder, **not** `./docs/`.
+- Do not create or update `docs/ISSUES*.md` for `/plan-qa` workflows in this repo.
+- Keep `/plan-qa` issue logs, completed issues, and indexes under `.plan/` instead.
+- If an issue was accidentally logged in `./docs/` during `/plan-qa`, stop and move future updates to `.plan/`.
+
 **Violated in this chat (Dec 10, 2025):**
 - Created `V3_ARCHITECTURE_FIX_COMPLETE.md` immediately after establishing "one file per topic" rule
 - Should have updated existing `V3_REGISTRATION_FIX_PLAN.md` instead
@@ -224,6 +237,16 @@ This creates a feedback loop for continuous improvement.
   - NOT from third-party device requests
 
 **Implementation note:** In `Messages.ts`, gate IntelliCenter Action 168 handling to ignore non-OCP sources (especially src!=16 dest==16).
+
+### 10.3 IntelliCenter v3 Registration: Never Spoof A Live Hardware Address
+**Rule:** Do **NOT** adopt, impersonate, or respond on an address that belongs to a real hardware device (for example Wireless/WCP `36`), even if the OCP mirrors njsPC's MAC/registration payload onto that address.
+
+- Keep njsPC on its configured/plugin address (for example `33`) unless the user explicitly approves a different app address.
+- Treat `253`/`217`/`179` traffic for a different live device address as **evidence of an unresolved registration/mapping problem**, not as success.
+- Do **not** answer heartbeat (`180`), send registration (`251`), or request config (`228`/`222`) on the mirrored hardware address.
+- If the OCP associates njsPC's MAC with a real device address, stop treating that as a valid fix path and investigate why the standalone app address is not being accepted.
+
+**Rationale:** Reusing the same address as real hardware is an anti-pattern on IntelliCenter and can hide the real registration bug while colliding with actual devices (WCP/ICP/other panels).
 
 ### 11. Modifying Existing Rules
 **Rule:** Never modify, remove, or contradict existing rules in AGENTS.md without explicit user approval

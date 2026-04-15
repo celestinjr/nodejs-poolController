@@ -76,12 +76,16 @@ export class VersionMessage {
 
         this.lastConfigRefreshTime = now;
         logger.silly(`v3.004+ ${source}: Sending Action 228`);
+        const commandSource = sys.board.commandSourceAddress || Message.pluginAddress;
         Outbound.create({
+            source: commandSource,
             dest: 16, action: 228, payload: [0], retries: 2,
             scope: 'v3RefreshTrigger',
-            // v3.004+: require 164 addressed to us (not to Wireless).
-            response: Response.create({ dest: Message.pluginAddress, action: 164 })
-        }).sendAsync();
+            // v3.004+: require 164 addressed to our active command source address.
+            response: Response.create({ dest: commandSource, action: 164 })
+        }).sendAsync().catch((err) => {
+            logger.silly(`v3.004+ ${source}: Action 228 refresh failed: ${err.message}`);
+        });
     }
 
     /**
@@ -92,7 +96,8 @@ export class VersionMessage {
         if (sys.equipment.isIntellicenterV3 &&
             msg.source !== Message.pluginAddress &&  // Not from us
             msg.dest === 16) {                        // Directed to OCP
-            this.triggerConfigRefresh('Piggyback');
+            // TEST: disable Action 228 piggyback refresh for v3.008 A/B validation.
+            // this.triggerConfigRefresh('Piggyback');
         }
         msg.isProcessed = true;
     }

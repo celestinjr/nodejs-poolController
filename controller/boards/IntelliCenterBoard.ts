@@ -28,6 +28,14 @@ import { InvalidEquipmentIdError, InvalidEquipmentDataError, EquipmentNotFoundEr
 import { ncp } from '../nixie/Nixie';
 import { Timestamp } from "../Constants"
 export class IntelliCenterBoard extends SystemBoard {
+    private static readonly DEFAULT_REGISTRATION_DEVICE_ID = [2, 110, 106, 115, 80, 67];
+    private static readonly ICP_REGISTRATION_DEVICE_TYPE = 1;
+    private static readonly ICP_REGISTRATION_TRAILER = [1, 0, 10];
+    private static readonly UNREGISTERED_ANNOUNCE_INTERVAL_MS = 5000;
+    private static readonly REGISTERED_ANNOUNCE_INTERVAL_MS = 300000;
+    private static readonly REGISTRATION_STATUS_TIMEOUT_MS = 2500;
+    private static readonly REGISTRATION_STATUS_POLL_MS = 100;
+    private static readonly REGISTRATION_MAX_ATTEMPTS = 4;
     public needsConfigChanges: boolean = false;
     constructor(system: PoolSystem) {
         super(system);
@@ -269,6 +277,8 @@ export class IntelliCenterBoard extends SystemBoard {
     private _announceDeviceInterval?: NodeJS.Timeout;
     private _announceDeviceTickInFlight: boolean = false;
     private _announceDeviceLastSentMs: number = 0;
+    private _registrationBootstrapStarted: boolean = false;
+    private _runtimeRegistrationAddress?: number;
     public system: IntelliCenterSystemCommands = new IntelliCenterSystemCommands(this);
     public circuits: IntelliCenterCircuitCommands = new IntelliCenterCircuitCommands(this);
     public features: IntelliCenterFeatureCommands = new IntelliCenterFeatureCommands(this);
@@ -288,27 +298,28 @@ export class IntelliCenterBoard extends SystemBoard {
         this.modulesAcquired = false;
     }
     private startAnnounceDeviceInterval(): void {
-        // v3-only: Wireless remote appears to periodically re-announce itself (captures show ~5-10s).
-        // For now we emit Action 251 every 5 minutes while the board is running.
+        // v3-only: Wireless re-announces aggressively during bootstrap, then settles once registered.
+        // Mirror that behavior by retrying every 5s until Action 217 shows status=1, then fall back
+        // to a long keepalive interval to avoid unnecessary bus noise once we're established.
         if (!sys.equipment.isIntellicenterV3) return;
         if (this._announceDeviceInterval) return;
 
         this._announceDeviceInterval = setInterval(async () => {
             if (this._announceDeviceTickInFlight) return;
+            const now = Date.now();
+            const minInterval = state.equipment.registration === 1
+                ? IntelliCenterBoard.REGISTERED_ANNOUNCE_INTERVAL_MS
+                : IntelliCenterBoard.UNREGISTERED_ANNOUNCE_INTERVAL_MS;
+            if (now - this._announceDeviceLastSentMs < minInterval) return;
             this._announceDeviceTickInFlight = true;
             try {
-                // Avoid spamming if the event loop stalls and intervals bunch up.
-                const now = Date.now();
-                if (now - this._announceDeviceLastSentMs >= 300000) {
-                    await this.announceDevice();
-                    this._announceDeviceLastSentMs = now;
-                }
+                await this.announceDevice();
             } catch (err) {
                 logger.warn(`announceDevice interval tick failed: ${err?.message || err}`);
             } finally {
                 this._announceDeviceTickInFlight = false;
             }
-        }, 300000);
+        }, IntelliCenterBoard.UNREGISTERED_ANNOUNCE_INTERVAL_MS);
     }
     private stopAnnounceDeviceInterval(): void {
         if (this._announceDeviceInterval) {
@@ -318,15 +329,123 @@ export class IntelliCenterBoard extends SystemBoard {
         this._announceDeviceTickInFlight = false;
         this._announceDeviceLastSentMs = 0;
     }
+    private async sleepAsync(ms: number): Promise<void> {
+        return await new Promise(resolve => setTimeout(resolve, ms));
+    }
+    private async waitForRegistrationStatusAsync(timeoutMs = IntelliCenterBoard.REGISTRATION_STATUS_TIMEOUT_MS): Promise<boolean> {
+        const deadline = Date.now() + timeoutMs;
+        while (Date.now() < deadline) {
+            if (state.equipment.registration === 1) return true;
+            await this.sleepAsync(IntelliCenterBoard.REGISTRATION_STATUS_POLL_MS);
+        }
+        return state.equipment.registration === 1;
+    }
+    private async ensureRegisteredAsync(): Promise<void> {
+        if (!sys.equipment.isIntellicenterV3) return;
+
+        // `poolState.json` persists the last known registration status. Clear that stale local view
+        // at the start of each bootstrap so this session must prove fresh Action 217 status=1.
+        state.equipment.registration = 0;
+
+        for (let attempt = 1; attempt <= IntelliCenterBoard.REGISTRATION_MAX_ATTEMPTS; attempt++) {
+            try {
+                await this.announceDevice();
+            } catch (err) {
+                logger.warn(`Action 251 registration attempt ${attempt}/${IntelliCenterBoard.REGISTRATION_MAX_ATTEMPTS} failed: ${err?.message || err}`);
+            }
+
+            if (await this.waitForRegistrationStatusAsync()) return;
+
+            const reg = state.equipment.registration;
+            const regLabel = reg === 4 ? 'status=4 (stale/needs-reauth)' : `status=${reg}`;
+            if (attempt < IntelliCenterBoard.REGISTRATION_MAX_ATTEMPTS) {
+                logger.info(`IntelliCenter v3 registration attempt ${attempt}/${IntelliCenterBoard.REGISTRATION_MAX_ATTEMPTS} did not reach Action 217 status=1 (${regLabel}); retrying Action 251`);
+                await this.sleepAsync(IntelliCenterBoard.UNREGISTERED_ANNOUNCE_INTERVAL_MS);
+            }
+        }
+
+        throw new Error(`IntelliCenter v3 registration never reached Action 217 status=1 (last status=${state.equipment.registration})`);
+    }
+    private startRegistrationBootstrapAsync(): void {
+        if (!sys.equipment.isIntellicenterV3) return;
+        if (this._registrationBootstrapStarted) return;
+        this._registrationBootstrapStarted = true;
+        this.ensureRegisteredAsync().catch((err) => {
+            logger.warn(`IntelliCenter v3 registration bootstrap failed: ${err?.message || err}`);
+        });
+    }
+    private shouldConvergeToFirstIcpAddress(profileAddress: number, profileDeviceType: number, deviceAddress: number, payloadDeviceType: number, status: number): boolean {
+        return profileAddress === 33 &&
+            deviceAddress === 32 &&
+            profileDeviceType === IntelliCenterBoard.ICP_REGISTRATION_DEVICE_TYPE &&
+            payloadDeviceType === IntelliCenterBoard.ICP_REGISTRATION_DEVICE_TYPE &&
+            status === 1;
+    }
+    private setRuntimeRegistrationAddress(address: number, reason: string): void {
+        const normalizedAddress = Math.max(0, Math.min(255, Math.trunc(address)));
+        if (this._runtimeRegistrationAddress === normalizedAddress && Message.pluginAddress === normalizedAddress) return;
+        this._runtimeRegistrationAddress = normalizedAddress;
+        Message.setPluginAddress(normalizedAddress, reason);
+    }
+    private getRegistrationProfile(): { address: number; deviceType: number; registrationIdentity: number[]; reserved: number[]; trailer: number[]; } {
+        return {
+            address: this._runtimeRegistrationAddress ?? Message.pluginAddress,
+            deviceType: IntelliCenterBoard.ICP_REGISTRATION_DEVICE_TYPE,
+            registrationIdentity: [...IntelliCenterBoard.DEFAULT_REGISTRATION_DEVICE_ID],
+            reserved: [0, 0, 0, 0],
+            trailer: [...IntelliCenterBoard.ICP_REGISTRATION_TRAILER]
+        };
+    }
+    public getRegistrationAddress(): number {
+        return this.getRegistrationProfile().address;
+    }
+    public isOwnRegistrationPayload(payload: number[], payloadOffset = 7): boolean {
+        const profile = this.getRegistrationProfile();
+        if (!Array.isArray(payload) || payload.length < payloadOffset + profile.registrationIdentity.length) return false;
+        for (let i = 0; i < profile.registrationIdentity.length; i++) {
+            if (payload[payloadOffset + i] !== profile.registrationIdentity[i]) return false;
+        }
+        return true;
+    }
+    public isOwnHeartbeatPayload(payload: number[]): boolean {
+        return this.isOwnRegistrationPayload(payload, 0);
+    }
+    public processRegistrationMessage(msg: Inbound): boolean {
+        if (!this.isOwnRegistrationPayload(msg.payload)) return false;
+
+        const profile = this.getRegistrationProfile();
+        const deviceAddress = msg.extractPayloadByte(0);
+        const payloadDeviceType = msg.extractPayloadByte(1, 0);
+        const registrationStatus = msg.payload.length > 2 ? msg.extractPayloadByte(2) : -1;
+
+        if (this.shouldConvergeToFirstIcpAddress(profile.address, profile.deviceType, deviceAddress, payloadDeviceType, registrationStatus)) {
+            logger.warn(`IntelliCenter v3 first ICP registration converged from device ${profile.address} to device ${deviceAddress}.`);
+            this.setRuntimeRegistrationAddress(deviceAddress, 'IntelliCenter first ICP registration');
+        }
+
+        const expectedAddress = this.getRegistrationAddress();
+        if (deviceAddress !== expectedAddress) {
+            logger.warn(`Ignoring IntelliCenter v3 Action ${msg.action} for matching MAC on device ${deviceAddress}; expected device ${expectedAddress}.`);
+            return false;
+        }
+        if (msg.action === 217 && msg.payload.length > 2) {
+            this.setRegistrationStatus(registrationStatus);
+        }
+        return true;
+    }
     public async announceDevice(): Promise<void> {
-        // v3.004 requires device registration via Action 251→253 before responding to config requests
+        // v3.004 registration (251→253/217) is needed for heartbeat identity/session health,
+        // but config bootstrap (228→164→222/30) can begin before registration fully settles.
         // In mock mode we still want to "send" the packet so it is logged/emitted like a real write.
 
+        this._announceDeviceLastSentMs = Date.now();
         logger.info('Announcing device to IntelliCenter v3.004...');
         // Action 251 payload structure (22 bytes total) verified from wireless remote cradle reset:
         // [0]:      Device address (33 for njsPC)
-        // [1]:      Reserved (0)
-        // [2]:      Registration flag (0=not registered, 1=registered - OCP sets to 1 in Action 253)
+        // [1]:      Device type (1=ICP/Wired panel profile, 0=wireless profile)
+        // [2]:      Registration flag (njsPC still sends 0 as its registration request; live wireless
+        //           boot also showed device-originated 251 packets with byte 2 = 1, so treat this field
+        //           as device/session-specific rather than a universal "request vs response" switch)
         // [3-6]:    Reserved (zeros)
         // [7-12]:   Device identifier (6 bytes - must(?) be valid MAC address format!)
         //           Using locally-administered MAC: 02:6E:6A:73:50:43 = [2, 110, 106, 115, 80, 67]
@@ -334,26 +453,27 @@ export class IntelliCenterBoard extends SystemBoard {
         //           Remaining bytes = "njsPC" in ASCII for identification
         // [13-16]:  Reserved (zeros)
         // [17-18]:  Firmware version (major, minor)
-        // [19-21]:  Unknown bytes (1, 7, 11 - copied from wireless remote in all captures)
+        // [19-21]:  Device trailer bytes (live 3.008 captures show 1,0,10 for ICP/WL 251)
+        const profile = this.getRegistrationProfile();
         const fwMajor = parseInt(sys.equipment.controllerFirmware || "3") || 3;
         const fwMinor = Math.round((parseFloat(sys.equipment.controllerFirmware || "3.0") % 1) * 1000);
         const out: Outbound = Outbound.create({
+            source: profile.address,
             dest: 16,  // MUST send to OCP (16), not broadcast (15)
             action: 251,
             scope: 'v3Registration',
             payload: [
-                Message.pluginAddress,  // [0] Device address (33)
-                0,                      // [1] Reserved
+                profile.address,        // [0] Device address
+                profile.deviceType,     // [1] Device type
                 0,                      // [2] Registration flag (0=requesting, 1=registered, 4=stale/needs-reauth)
-                0, 0, 0, 0,            // [3-6] Reserved
-                2, 110, 106, 115, 80, 67,  // [7-12] Device ID: MAC 02:6E:6A:73:50:43 (locally-administered)
+                ...profile.reserved,    // [3-6] Reserved / panel-type flags
+                ...profile.registrationIdentity,               // [7-12] Device identity bytes
                 0, 0, 0, 0,            // [13-16] Reserved
                 fwMajor, fwMinor,      // [17-18] Firmware version
-                1, 7, 11               // [19-21] Unknown (copied from wireless remote)
+                ...profile.trailer      // [19-21] Device trailer bytes
             ],
-            retries: 3,
-            // Action 253 comes from OCP (src=16) to broadcast (dest=15).
-            response: Response.create({ source: 16, dest: 15, action: 253 })
+            retries: 0,
+            response: false
         });
         await out.sendAsync();
         logger.silly('Device registration request sent, awaiting confirmation via Action 217');
@@ -378,7 +498,9 @@ export class IntelliCenterBoard extends SystemBoard {
         try {
             // v3.x: Wireless/ICP traffic is unicast to OCP (16) and includes 228→164 (version table) with ACK(164).
             if (parseFloat(sys.equipment.controllerFirmware || "0") >= 3.0) {
-                await this.announceDevice();
+                // ISSUE-003: don't block startup config polling on registration completion.
+                // Start registration attempts in the background and send Action 228 immediately.
+                this.startRegistrationBootstrapAsync();
                 await this.requestVersionsAsync(16);
             } else {
                 // v1.x: keep existing behavior unchanged
@@ -387,8 +509,7 @@ export class IntelliCenterBoard extends SystemBoard {
             }
         }
         catch (err) {
-            // If the port isn't open yet, we'll retry when it opens
-            logger.warn(`checkConfiguration failed (port may not be open yet): ${err.message}`);
+            logger.warn(`checkConfiguration failed: ${err.message}`);
         }
     }
     public isConfigQueueProcessing(): boolean {
@@ -421,7 +542,9 @@ export class IntelliCenterBoard extends SystemBoard {
     }
 
     private async requestVersionsAsync(dest: number): Promise<void> {
+        const registrationAddress = this.getRegistrationAddress();
         const verReq = Outbound.create({
+            source: registrationAddress,
             dest,
             action: 228,
             scope: sys.equipment.isIntellicenterV3 ? 'v3VersionSync' : undefined,
@@ -429,17 +552,19 @@ export class IntelliCenterBoard extends SystemBoard {
             retries: 3,
             // v3.004+: require the version response (164) to be addressed to us (not to Wireless).
             response: sys.equipment.isIntellicenterV3
-                ? Response.create({ dest: Message.pluginAddress, action: 164 })
+                ? Response.create({ dest: registrationAddress, action: 164 })
                 : Response.create({ action: 164 })
         });
         await verReq.sendAsync();
         if (sys.equipment.isIntellicenterV3) {
             // For v3, wireless/ICP ACKs 164 back to OCP (always unicast to 16).
-            await Outbound.create({ dest: 16, action: 1, payload: [164], retries: 0 }).sendAsync();
+            await Outbound.create({ source: registrationAddress, dest: 16, action: 1, payload: [164], retries: 0 }).sendAsync();
         }
     }
     public async stopAsync() {
         this.stopAnnounceDeviceInterval();
+        this._registrationBootstrapStarted = false;
+        this._runtimeRegistrationAddress = undefined;
         this._configQueue.close();
         return super.stopAsync();
     }
@@ -784,7 +909,7 @@ export class IntelliCenterBoard extends SystemBoard {
             if (typeof mt.chemControllers !== 'undefined') inv.chemControllers += mt.chemControllers;
         }
     }
-    public get commandSourceAddress(): number { return Message.pluginAddress; }
+    public get commandSourceAddress(): number { return this.getRegistrationAddress(); }
     public get commandDestAddress(): number { return sys.equipment.isIntellicenterV3 ? 16 : 15; }
     public static getAckResponse(action: number, source?: number, dest?: number): Response { return Response.create({ source: source, dest: dest || sys.board.commandSourceAddress, action: 1, payload: [action] }); }
 }
@@ -896,15 +1021,17 @@ class IntelliCenterConfigQueue extends ConfigQueue {
             // any other panel is awake at the same address it may actually collide with it
             // as both boards are processing at the same time and sending an outbound ack.
             const dest = sys.equipment.isIntellicenterV3 ? 16 : 15;
+            const source = sys.board.commandSourceAddress;
             let out = Outbound.create({
                 // v1: broadcast (15). v3: wireless/ICP unicasts to OCP (16).
+                source,
                 dest,
                 scope: sys.equipment.isIntellicenterV3 ? 'v3ConfigQueue' : undefined,
                 action: 222, payload: [this.curr.category, itm], retries: 5,
                 // v3.004+: some config requests can yield an Action 30 with an empty payload (length=0).
                 // Those packets still indicate "done" for the requested item, but cannot be matched by payload prefix.
                 response: sys.equipment.isIntellicenterV3
-                    ? Response.create({ dest: Message.pluginAddress, action: 30 })
+                    ? Response.create({ dest: source, action: 30 })
                     : Response.create({ dest: -1, action: 30, payload: [this.curr.category, itm] })
             });
             logger.verbose(`Requesting config for: ${ConfigCategories[this.curr.category]} - Item: ${itm}`);
@@ -4009,6 +4136,42 @@ class IntelliCenterHeaterCommands extends HeaterCommands {
             heater.efficiencyMode, heater.maxBoostTemp, heater.economyTime], 0);
         out.insertPayloadString(11, heater.name, 16);
         return out;
+    }
+    public getInstalledHeaterTypes(body?: number): any {
+        const heaters = sys.heaters.get();
+        const types = sys.board.valueMaps.heaterTypes.toArray();
+        const inst: any = { total: 0 };
+        for (let i = 0; i < types.length; i++) if (types[i].name !== 'none') inst[types[i].name] = 0;
+
+        const matchesBody = (heaterBody: number, requestedBody: number): boolean => {
+            // Shared-body sentinel used in existing logic.
+            if (heaterBody === 32) return requestedBody <= 2;
+
+            // IntelliCenter reports body associations using body circuit IDs in config payloads.
+            // Map those IDs so per-body heater options stay accurate in runtime state/UI.
+            if (heaterBody === 6) return sys.equipment.shared ? requestedBody <= 2 : requestedBody === 1; // Pool circuit
+            if (heaterBody === 1) return sys.equipment.shared ? requestedBody <= 2 : requestedBody === 2; // Spa circuit
+            if (heaterBody === 12) return requestedBody === 3; // Body 3 circuit
+            if (heaterBody === 22) return requestedBody === 4; // Body 4 circuit
+
+            // Fallback to existing generic formats.
+            return requestedBody === heaterBody + 1 || requestedBody === heaterBody;
+        };
+
+        for (let i = 0; i < heaters.length; i++) {
+            const heater = heaters[i];
+            if (typeof body !== 'undefined' && typeof heater.body !== 'undefined') {
+                if (!matchesBody(heater.body, body)) continue;
+            }
+            const type = types.find(elem => elem.val === heater.type);
+            if (typeof type !== 'undefined') {
+                if (inst[type.name] === 'undefined') inst[type.name] = 0;
+                inst[type.name] = inst[type.name] + 1;
+                if (heater.coolingEnabled === true && type.hasCoolSetpoint === true) inst['hasCoolSetpoint'] = true;
+                inst.total++;
+            }
+        }
+        return inst;
     }
     public async setHeater(heater: Heater, obj?: any) {
         super.setHeater(heater, obj);
