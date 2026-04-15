@@ -102,10 +102,16 @@ export class EquipmentMessage {
                         if (sys.equipment.maxBodies >= bodyId) {
                             body = sys.bodies.getItemById(bodyId, bodyId <= sys.equipment.maxBodies);
                             sbody = state.temps.bodies.getItemById(bodyId, bodyId <= sys.equipment.maxBodies);
-                            // On shared-body IntelliCenter (Pool+Spa), the Spa name is often in the SECOND string (offset 18),
-                            // while the first string (offset 2) repeats Pool.
-                            const nameOffset = (sys.equipment.shared === true && sys.equipment.dual !== true) ? 18 : 2;
-                            sbody.name = body.name = msg.extractPayloadString(nameOffset, 16);
+                            const firstName = msg.extractPayloadString(2, 16);
+                            const secondName = msg.extractPayloadString(18, 16);
+                            if (sys.equipment.shared === true && sys.equipment.dual !== true) {
+                                // Shared-body systems often carry placeholder names in case 3 (for body 3/4 slots).
+                                // Do not overwrite a valid Spa name with "UNCONFIGURED".
+                                const resolvedName = EquipmentMessage.resolveSharedBody2Name(firstName, secondName, body.name);
+                                if (typeof resolvedName !== 'undefined') sbody.name = body.name = resolvedName;
+                            } else {
+                                sbody.name = body.name = firstName;
+                            }
                         }
                         else {
                             sys.bodies.removeItemById(bodyId);
@@ -206,6 +212,16 @@ export class EquipmentMessage {
         if (raw.length === 0) return 0;
         if (raw.length === 1) return raw[0] & 0xFF;
         return ((raw[raw.length - 2] & 0xFF) << 8) | (raw[raw.length - 1] & 0xFF);
+    }
+    private static isPlaceholderBodyName(name: string): boolean {
+        const normalized = (name || '').replace(/\u0000/g, '').trim().toUpperCase();
+        return normalized.length === 0 || normalized === 'UNCONFIGURED';
+    }
+    private static resolveSharedBody2Name(firstName: string, secondName: string, currentName: string): string | undefined {
+        if (!EquipmentMessage.isPlaceholderBodyName(secondName)) return secondName;
+        if (!EquipmentMessage.isPlaceholderBodyName(firstName)) return firstName;
+        if (EquipmentMessage.isPlaceholderBodyName(currentName)) return secondName;
+        return undefined;
     }
     //private static calcModel(eq: Equipment) {
     //    eq.shared = (eq.type & 8) === 8;

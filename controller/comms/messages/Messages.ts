@@ -73,7 +73,8 @@ export class Message {
     // Internal Storage
     protected _complete: boolean = false;
     public static headerSubByte: number = 33;
-    public static pluginAddress: number = config.getSection('controller', { address: 33 }).address;
+    public static configuredPluginAddress: number = config.getSection('controller', { address: 33 }).address;
+    public static pluginAddress: number = Message.configuredPluginAddress;
     private _id: number = -1;
     // Fields
     private static _messageId: number = 0;
@@ -81,6 +82,13 @@ export class Message {
         let i = this._messageId < 80000 ? ++this._messageId : this._messageId = 0;
         //logger.debug(`Assigning message id ${i}`)
         return i; }
+    public static setPluginAddress(address: number, reason = 'runtime update'): void {
+        if (typeof address !== 'number' || !isFinite(address)) return;
+        const normalized = Math.max(0, Math.min(255, Math.trunc(address)));
+        if (Message.pluginAddress === normalized) return;
+        logger.info(`Updating plugin address from ${Message.pluginAddress} to ${normalized} (${reason})`);
+        Message.pluginAddress = normalized;
+    }
     public portId = 0; // This will be the target or source port for the message.  If this is from or to an Aux RS485 port the value will be > 0.
     public timestamp: Date = new Date();
     public direction: Direction = Direction.In;
@@ -386,25 +394,16 @@ export class Inbound extends Message {
     }
     private testRegalModbusHeader(bytes: number[], ndx: number): boolean {
         // RegalModbus protocol: header, function, ack, payload, crcLo, crcHi
-        // Only accept messages from known RegalModbus pumps to avoid misidentifying noise/Broadcast fragments
+        // Only accept messages from configured Regal Modbus pumps (by address) to avoid misidentifying noise/broadcast fragments
         if (bytes.length > ndx + 3 && sys.controllerType === 'nixie') {
             let addr = bytes[ndx];
+            const regalType = sys.board.valueMaps.pumpTypes.getValue('regalmodbus');
+            if (typeof sys.pumps.find(p => p.address === addr && p.type === regalType) === 'undefined') {
+                return false;
+            }
             let func = bytes[ndx + 1];
             let ack = bytes[ndx + 2];
             let acceptableAcks = [0x10, 0x20, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x09, 0x0A];
-
-            // First check if address matches a configured RegalModbus pump
-            let pumps = sys.pumps.get();
-            let isKnownPump = false;
-            for (let pump of pumps) {
-                if (pump.type === 200 && pump.address === addr) {
-                    isKnownPump = true;
-                    break;
-                }
-            }
-            if (!isKnownPump) {
-                return false;
-            }
 
             if (addr >= 0x15 && addr <= 0xF7 && func >= 0x00 && func <= 0x7F && acceptableAcks.includes(ack) &&
                 this.isAddressForPumpType(addr, 'regalmodbus', ['neptunemodbus'])) {
@@ -894,7 +893,9 @@ export class Inbound extends Message {
                         // v3.004+ piggyback: only route ACKs we care about (168/184) into a single handler
                         // to avoid doing extra work on every ACK frame.
                         if (this.payload.length === 1 && (this.payload[0] === 168 || this.payload[0] === 184)) {
-                            VersionMessage.processActionAck(this);
+                            // TEST: disable ACK-triggered refresh for v3.008 piggyback A/B validation.
+                            // VersionMessage.processActionAck(this);
+                            this.isProcessed = true;
                         } else {
                             this.isProcessed = true;
                         }
@@ -943,10 +944,7 @@ export class Inbound extends Message {
                         this.isProcessed = true;
                         break;
                     case 253: // v3.004+ Device registration confirmation
-                        // OCP sends this in response to Action 251
-                        // Payload byte 2: 1 = registered, 0 = not registered
-                        logger.info(`Device registration confirmed: ${this.toPacket()}`);
-                        this.isProcessed = true;
+                        EquipmentStateMessage.process(this);
                         break;
                     default:
                         logger.info(`An unprocessed message was received ${this.toPacket()}`)
