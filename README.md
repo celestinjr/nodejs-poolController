@@ -1,7 +1,9 @@
 # nodejs-poolController - Version 8.4.0
 
 ```diff
-+ INTELLICENTER USERS: Firmware v3.004+ is supported, but still being refined.  If you run into issues, please open a discussion and include a replay capture.
++ INTELLICENTER USERS: Firmware v3.008+ is supported.  
+If you run into issues, please open a new discussion and include a replay capture.
+Also see discussion #1171 for ongoing updates.
 ```
 
 ## What is nodejs-poolController
